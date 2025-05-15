@@ -1,9 +1,20 @@
 [project]
 name = "softrag"
 version = "0.1.0"
-description = "Add your description here"
+description = "Minimal local-first Retrieval-Augmented Generation (RAG) library using SQLite with sqlite-vec"
 readme = "README.md"
 requires-python = ">=3.12"
+authors = [
+    {name = "SoftRAG Team", email = "contato@softrag.com"},
+]
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Intended Audience :: Developers",
+]
 dependencies = [
     "langchain>=0.3.25",
     "langchain-openai>=0.3.16",
@@ -13,8 +24,15 @@ dependencies = [
     "trafilatura>=2.0.0",
 ]
 
+[project.urls]
+"Homepage" = "https://github.com/JulioPeixoto/softrag"
+"Bug Tracker" = "https://github.com/JulioPeixoto/softrag/issues"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]    
 where = ["."]
 include = ["softrag*"]              
-exclude = ["exemples*", "tests*"]  
+exclude = ["examples*", "tests*"]  

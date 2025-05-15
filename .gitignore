@@ -175,5 +175,15 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
+# SoftRAG specific
 *.db
+*.db-shm
+*.db-wal
 *.txt
+!requirements.txt
+
+# Caches
+.cache/
+
+# VS Code
+.vscode/
