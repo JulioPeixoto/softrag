@@ -68,14 +68,6 @@ class Rag:
         chat_model: Model to generate context-based responses.
         db_path: Path to the SQLite database file.
         db: Connection to the SQLite database.
-        
-    Examples:
-        >>> from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-        >>> chat = ChatOpenAI(model="gpt-4o")
-        >>> embed = OpenAIEmbeddings(model="text-embedding-3-small")
-        >>> rag = Rag(embed_model=embed, chat_model=chat)
-        >>> rag.add_file("document.txt")
-        >>> response = rag.query("What is the main topic?")
     """
 
     def __init__(
