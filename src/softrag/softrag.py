@@ -17,13 +17,16 @@ import sqlite3
 import json
 import hashlib
 import struct
+import subprocess
 from pathlib import Path
 from typing import Sequence, Dict, Any, List, Callable
 
 import sqlite_vec
 import trafilatura
 import fitz
-
+import docx2txt
+import mammoth
+import textract
 
 SQLITE_PAGE_SIZE = 32_768
 EMBED_DIM = 1_536
@@ -234,13 +237,39 @@ class Rag:
         Raises:
             ValueError: If the file type is not supported.
         """
-        ext = Path(path).suffix.lower()
+        path = Path(path)
+        ext = path.suffix.lower()
+
         if ext == ".pdf":
-            return "\n".join(
-                page.get_text("text", sort=True) for page in fitz.open(path)
-            )
+            import fitz
+            return "\n".join(p.get_text("text", sort=True) for p in fitz.open(path))
+
         if ext in {".txt", ".md"}:
-            return Path(path).read_text(encoding="utf-8", errors="ignore")
+            return path.read_text(encoding="utf-8", errors="ignore")
+
+        if ext == ".docx":
+            try:
+                return docx2txt.process(str(path))
+            except Exception:
+                with open(path, "rb") as docx_file:
+                    html = mammoth.convert_to_html(docx_file).value
+                from bs4 import BeautifulSoup
+                return BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+
+        if ext == ".doc":
+            try:
+                return textract.process(str(path)).decode("utf-8", errors="ignore")
+            except Exception:
+                try:
+                    output = subprocess.check_output(
+                        ["antiword", str(path)], stderr=subprocess.DEVNULL
+                    )
+                    return output.decode("utf-8", errors="ignore")
+                except FileNotFoundError as e:
+                    raise RuntimeError(
+                        "To extract text from .doc files, please install antiword:\n"
+                    ) from e
+
         raise ValueError(f"Unsupported file type: {ext}")
 
     def _extract_web(self, url: str) -> str:

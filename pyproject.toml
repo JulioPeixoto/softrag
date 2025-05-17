@@ -16,11 +16,14 @@ classifiers = [
     "Intended Audience :: Developers",
 ]
 dependencies = [
+    "docx2txt>=0.9",
     "langchain>=0.3.25",
     "langchain-openai>=0.3.16",
+    "mammoth>=1.9.0",
     "openai>=1.78.1",
     "pymupdf>=1.25.5",
     "sqlite-vec>=0.1.6",
+    "textract>=1.6.5",
     "trafilatura>=2.0.0",
 ]
 
