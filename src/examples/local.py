@@ -37,25 +37,18 @@ class OllamaChat:
         return response['message']['content']
 
 
-def main():
-    embed_model = OllamaEmbeddings()
-    chat_model = OllamaChat()
-    
-    rag = Rag(embed_model=embed_model, chat_model=chat_model)
-    
-    try:
-        rag.add_file("document.txt") 
-        print("✅ Content successfully added!")
-        
-        question = "What is the main topic of this document?"
-        print(f"\nQuestion: {question}")
-        
-        response = rag.query(question)
-        print(f"\nResponse:\n{response}")
-        
-    except Exception as e:
-        print(f"❌ Error: {e}")
+embed_model = OllamaEmbeddings()
+chat_model = OllamaChat()
 
+rag = Rag(embed_model=embed_model, chat_model=chat_model)
 
-if __name__ == "__main__":
-    main() 
+try:
+    rag.add_file("document.txt")         
+    question = "What is the main topic of this document?"
+    print(f"\nQuestion: {question}")
+    
+    response = rag.query(question)
+    print(f"\nResponse:\n{response}")
+    
+except Exception as e:
+    print(f"❌ Error: {e}")
