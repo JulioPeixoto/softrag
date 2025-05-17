@@ -39,7 +39,7 @@ embed = OpenAIEmbeddings(model="text-embedding-3-small")
 rag = Rag(embed_model=embed, chat_model=chat)
 
 # Add content
-rag.add_file("document.pdf")  # Supports PDF, TXT, MD
+rag.add_file("document.pdf") 
 rag.add_web("https://example.com/page")
 
 # Make a query
