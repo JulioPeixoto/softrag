@@ -17,11 +17,8 @@ classifiers = [
 ]
 dependencies = [
     "docx2txt>=0.9",
-    "langchain>=0.3.25",
-    "langchain-openai>=0.3.16",
     "langchain-text-splitters>=0.3.8",
     "mammoth>=1.9.0",
-    "openai>=1.78.1",
     "pymupdf>=1.25.5",
     "sqlite-vec>=0.1.6",
     "textract>=1.6.5",
