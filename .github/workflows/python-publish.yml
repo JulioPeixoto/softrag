@@ -3,7 +3,7 @@ name: Publish Python 🐍 package 📦 to TestPyPI & PyPI
 
 on:
   push:
-    branches: [main]          # build + TestPyPI para cada commit na main
+    branches: [master]          # build + TestPyPI para cada commit na master
     tags:     ['v*']          # build + PyPI quando a ref for tag vX.Y.Z
   workflow_dispatch: {}       # botão “Run workflow” para testes manuais
 
