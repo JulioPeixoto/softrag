@@ -5,7 +5,7 @@ This example demonstrates how to initialize softrag with OpenAI models,
 add content from a web page, and perform a query.
 """
 
-from src.softrag.softrag import Rag 
+from softrag import Rag 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 
