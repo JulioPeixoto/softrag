@@ -1,0 +1,33 @@
+name: CI
+
+on: [push, pull_request]
+
+permissions: {contents: read}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.11"]   
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          uv pip install .[default]          # instala pacote + extras
+          uv pip install pytest ruff
+
+      - name: Lint
+        run: uv run ruff check softrag
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      - name: Build package
+        run: uv build --sdist --wheel --out dist
