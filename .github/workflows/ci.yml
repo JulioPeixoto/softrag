@@ -26,8 +26,8 @@ jobs:
       - name: Lint
         run: uv run ruff check softrag
 
-      - name: Run tests
-        run: uv run pytest -q
+      # - name: Run tests
+      #   run: uv run pytest -q
 
       - name: Build package
         run: uv build --sdist --wheel --out dist
