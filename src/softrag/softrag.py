@@ -19,7 +19,7 @@ import hashlib
 import struct
 import subprocess
 from pathlib import Path
-from typing import Sequence, Dict, Any, List, Callable
+from typing import Sequence, Dict, Any, List, Callable, Union
 
 import sqlite_vec
 import trafilatura
@@ -27,12 +27,14 @@ import fitz
 import docx2txt
 import mammoth
 import textract
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 SQLITE_PAGE_SIZE = 32_768
 EMBED_DIM = 1_536
 
 EmbedFn = Callable[[str], List[float]]
 ChatFn = Callable[[str, Sequence[str]], str]
+Chunker = Union[str, Callable[[str], List[str]], None]
 
 
 def sha256(data: str) -> str:
@@ -74,7 +76,11 @@ class Rag:
     """
 
     def __init__(
-        self, *, embed_model, chat_model, db_path: str | os.PathLike = "softrag.db"
+        self, *, 
+        embed_model, 
+        chat_model,
+        db_path: str | os.PathLike = "softrag.db",
+        splitter: Chunker = None,
     ):
         """Initialize a new Softrag engine.
         
@@ -136,6 +142,37 @@ class Rag:
             return self.chat_model.invoke(prompt)
         else:
             return self._stream_response(prompt)
+
+    def _set_splitter(self, splitter: Chunker | None = None) -> None:
+        """Configure or update the text‑chunking strategy used on ingestion.
+
+        Parameters
+        ----------
+        splitter
+            * ``None`` – configure the default RecursiveCharacterTextSplitter
+              (``chunk_size=400``, ``chunk_overlap=100``).
+            * ``str`` – treat the string as a delimiter; empty chunks are
+              ignored.
+            * ``Callable[[str], list[str]]`` – custom function that receives the
+              full text and returns a list of non‑empty chunks.
+
+        Raises
+        ------
+        ValueError
+            If *splitter* is not of an accepted type.
+        """
+        if splitter is None:
+            rcts = RecursiveCharacterTextSplitter(
+                chunk_size=400,
+                chunk_overlap=100,
+                separators=["\n\n", "\n", " ", ""],
+            )
+            self._splitter: Callable[[str], List[str]] = rcts.split_text  
+        elif isinstance(splitter, str):
+            sep = splitter
+            self._splitter = lambda txt, s=sep: [p.strip() for p in txt.split(s) if p.strip()]
+        elif callable(splitter):
+            self._splitter = splitter  
 
     def _stream_response(self, prompt: str):
         """Stream the response from the chat model.
@@ -296,7 +333,7 @@ class Rag:
             text: Text to be stored.
             metadata: Metadata associated with the text.
         """
-        chunks = self._split(text)
+        chunks = self._splitter(text)  
         with self.db:
             for chunk in chunks:
                 h = sha256(chunk)
@@ -367,18 +404,6 @@ class Rag:
         """
         rows = self.db.execute(sql, (fts_query, q_vec, k)).fetchall()
         return [r[0] for r in rows]
-
-    @staticmethod
-    def _split(text: str) -> List[str]:
-        """Split the text into chunks for processing.
-        
-        Args:
-            text: Text to be split.
-            
-        Returns:
-            List of text chunks.
-        """
-        return [p.strip() for p in text.split("\n\n") if p.strip()]
 
 
 __all__ = ["Rag", "EmbedFn", "ChatFn"]
