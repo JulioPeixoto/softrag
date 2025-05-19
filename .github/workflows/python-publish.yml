@@ -1,5 +1,5 @@
 # .github/workflows/python-publish.yml
-name: Publish Python 🐍 package 📦 to TestPyPI & PyPI
+name: Publish Python 🐍 package 📦
 
 on:
   push:
