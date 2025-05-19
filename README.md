@@ -1,12 +1,8 @@
 # softrag [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/) [![PyPI version](https://img.shields.io/pypi/v/softrag.svg)](https://pypi.org/project/softrag/)
 
-
-
 <div align="center">
   <img src="piriquito.png" width="150" alt="SoftRAG mascot – periquito"/>
 </div>
-
-
 
 Minimal **local-first** Retrieval-Augmented Generation (RAG) library powered by **SQLite + sqlite-vec**.  
 Everything—documents, embeddings, cache—lives in a single `.db` file.
@@ -45,13 +41,22 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 chat  = ChatOpenAI(model="gpt-4o")
 embed = OpenAIEmbeddings(model="text-embedding-3-small")
 
-rag = Rag(embed_model=embed, chat_model=chat)      # default splitter (RCTS)
+rag = Rag(embed_model=embed, chat_model=chat)  # Uses default chunk splitter (RCTS)
 
+# Add documents to your knowledge base
 rag.add_file("document.pdf")
 rag.add_web("https://example.com/page")
 
-query = rag.query("What is the main information in this content?")
+# Query your knowledge base with context-augmented answers
+answer = rag.query("What is the main information in this content?")
+print(answer)
 ```
+
+also
+
+`_set_splitter(splitter=None)`: Configure the text chunking strategy.
+`_retrieve(query, k)`: Retrieve the most relevant text chunks for a given query.
+`_persist(text, metadata)`: Persist raw text into the database with optional metadata.
 
 ## 📚 Examples
 
@@ -77,6 +82,5 @@ Contributions are welcome! Please feel free to submit Pull Requests.
 ## 📜 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
 
 Developed with ❤️ for AI community

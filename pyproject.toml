@@ -1,6 +1,6 @@
 [project]
 name = "softrag"
-version = "0.1.0"
+version = "0.1.3"
 description = "Minimal local-first Retrieval-Augmented Generation (RAG) library using SQLite with sqlite-vec"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,6 +20,7 @@ dependencies = [
     "langchain-text-splitters>=0.3.8",
     "mammoth>=1.9.0",
     "pymupdf>=1.25.5",
+    "six>=1.12.0",
     "sqlite-vec>=0.1.6",
     "textract>=1.6.5",
     "trafilatura>=2.0.0",
@@ -27,7 +28,7 @@ dependencies = [
 
 [project.urls]
 "Homepage" = "https://github.com/JulioPeixoto/softrag"
-"Bug Tracker" = "https://github.com/JulioPeixoto/softrag/issues"
+"Issues " = "https://github.com/JulioPeixoto/softrag/issues"
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -37,3 +38,12 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 include = ["softrag*"]              
 exclude = ["examples*", "tests*"]  
+
+[tool.uv.sources]
+softrag = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "softrag",
+]

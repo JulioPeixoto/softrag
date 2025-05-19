@@ -187,3 +187,5 @@ pyrightconfig.json
 
 # VS Code
 .vscode/
+
+src/softrag/_version.py
