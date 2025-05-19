@@ -1,17 +1,27 @@
-# SoftRAG 🔍
+# softrag [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
-Minimal local-first Retrieval-Augmented Generation (RAG) library using SQLite with sqlite-vec.
+<div align="center">
+  <img src="piriquito.png" width="150" alt="SoftRAG mascot – periquito"/>
+</div>
+
+
+
+Minimal **local-first** Retrieval-Augmented Generation (RAG) library powered by **SQLite + sqlite-vec**.  
+Everything—documents, embeddings, cache—lives in a single `.db` file.
+
+---
 
 ## 🌟 Features
 
-- **Local-first**: All processing happens locally
-- **SQLite + sqlite-vec**: All data (documents, embeddings, cache) lives in a single `.db` file
-- **No cloud service dependency**: Pluggable architecture allows you to choose your own LLM backend
-- **Simple**: Minimalist and easy-to-use API
-- **Plug & Play**: Compatible with LangChain, Transformers, and other frameworks
+- **Local-first** – All processing happens locally, no external services.
+- **SQLite + sqlite-vec** – Documents, embeddings, and cache in a single `.db` file (no separate vector store or account needed).
+- **No cloud service dependency** – Plug in any LLM backend; no forced API keys for the core storage layer.
+- **Blazing-fast** – Designed for minimal overhead and maximum throughput on small- and medium-scale corpora. <!-- enfatizar performance -->
+- **Perfect for small & medium use cases** – Ideal when you need a lightweight, self-contained RAG solution. <!-- destacar o público-alvo -->
+- **Configurable chunking** – Default `RecursiveCharacterTextSplitter` (400/100) or your own strategy.
+- **Model-agnostic** – Works with OpenAI, Hugging Face, Ollama, etc.
+- **Zero heavy deps** – Core pulls only minimal extras (`langchain-text-splitters` optional).
 
 ## 📋 Requirements
 
@@ -31,20 +41,15 @@ pip install softrag
 from softrag import Rag
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-# Initialize models
-chat = ChatOpenAI(model="gpt-4o")
+chat  = ChatOpenAI(model="gpt-4o")
 embed = OpenAIEmbeddings(model="text-embedding-3-small")
 
-# Create instance
-rag = Rag(embed_model=embed, chat_model=chat)
+rag = Rag(embed_model=embed, chat_model=chat)      # default splitter (RCTS)
 
-# Add content
-rag.add_file("document.pdf") 
+rag.add_file("document.pdf")
 rag.add_web("https://example.com/page")
 
-# Make a query
-response = rag.query("What is the main information in this content?")
-print(response)
+query = rag.query("What is the main information in this content?")
 ```
 
 ## 📚 Examples
