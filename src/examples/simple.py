@@ -7,9 +7,9 @@ add content from a web page, and perform a query.
 
 from softrag import Rag 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+import os
 
-
-api_key = "your-api-key-here"
+api_key = os.getenv("OPENAI_API_KEY")
 
 chat = ChatOpenAI(model="gpt-4o", api_key=api_key, streaming=True)
 embed = OpenAIEmbeddings(model="text-embedding-3-small", api_key=api_key)
