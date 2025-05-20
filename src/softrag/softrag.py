@@ -80,7 +80,6 @@ class Rag:
         embed_model, 
         chat_model,
         db_path: str | os.PathLike = "softrag.db",
-        splitter: Chunker = None,
     ):
         """Initialize a new Softrag engine.
         
