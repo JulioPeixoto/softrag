@@ -17,17 +17,17 @@ import sqlite3
 import json
 import hashlib
 import struct
-import subprocess
+from io import BytesIO
 from pathlib import Path
-from typing import Sequence, Dict, Any, List, Callable, Union
+from typing import Sequence, Dict, Any, List, Callable, Union, IO
 
 import sqlite_vec
 import trafilatura
-import fitz
-import docx2txt
-import mammoth
-import textract
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from llama_index.readers.file.flat import FlatReader
+from llama_index.readers.file.docs.base import DocxReader
+from llama_index.readers.file.unstructured.base import UnstructuredReader
+
 
 SQLITE_PAGE_SIZE = 32_768
 EMBED_DIM = 1_536
@@ -35,7 +35,7 @@ EMBED_DIM = 1_536
 EmbedFn = Callable[[str], List[float]]
 ChatFn = Callable[[str, Sequence[str]], str]
 Chunker = Union[str, Callable[[str], List[str]], None]
-
+FileInput = Union[str, Path, bytes, bytearray, IO[bytes], IO[str]]
 
 def sha256(data: str) -> str:
     """Calculate the SHA-256 hash of a string.
@@ -96,7 +96,7 @@ class Rag:
         self._ensure_db()
 
     def add_file(
-        self, path: str | os.PathLike, metadata: Dict[str, Any] | None = None
+        self, data: FileInput, metadata: Dict[str, Any] | None = None
     ) -> None:
         """Add file content to the database.
         
@@ -107,8 +107,8 @@ class Rag:
         Raises:
             ValueError: If the file type is not supported.
         """
-        text = self._extract_file(path)
-        self._persist(text, {"source": str(path), **(metadata or {})})
+        text = self._extract_file(data)
+        self._persist(text, metadata or {})
 
     def add_web(self, url: str, metadata: Dict[str, Any] | None = None) -> None:
         """Add web page content to the database.
@@ -262,7 +262,7 @@ class Rag:
         with self.db:
             self.db.executescript(sql)
 
-    def _extract_file(self, path: str | os.PathLike) -> str:
+    def _extract_file(self, data: FileInput) -> str:
         """Extract text from a file.
         
         Args:
@@ -274,40 +274,27 @@ class Rag:
         Raises:
             ValueError: If the file type is not supported.
         """
-        path = Path(path)
-        ext = path.suffix.lower()
-
-        if ext == ".pdf":
-            import fitz
-            return "\n".join(p.get_text("text", sort=True) for p in fitz.open(path))
-
-        if ext in {".txt", ".md"}:
-            return path.read_text(encoding="utf-8", errors="ignore")
-
-        if ext == ".docx":
-            try:
-                return docx2txt.process(str(path))
-            except Exception:
-                with open(path, "rb") as docx_file:
-                    html = mammoth.convert_to_html(docx_file).value
-                from bs4 import BeautifulSoup
-                return BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
-
-        if ext == ".doc":
-            try:
-                return textract.process(str(path)).decode("utf-8", errors="ignore")
-            except Exception:
-                try:
-                    output = subprocess.check_output(
-                        ["antiword", str(path)], stderr=subprocess.DEVNULL
-                    )
-                    return output.decode("utf-8", errors="ignore")
-                except FileNotFoundError as e:
-                    raise RuntimeError(
-                        "To extract text from .doc files, please install antiword:\n"
-                    ) from e
-
-        raise ValueError(f"Unsupported file type: {ext}")
+        if isinstance(data, (str, Path)):
+            raw = Path(data).read_bytes()
+        elif hasattr(data, "read"):
+            content = data.read()
+            raw = content.encode("utf-8") if isinstance(content, str) else content
+        elif isinstance(data, (bytes, bytearray)):
+            raw = bytes(data)
+        else:
+            raise ValueError(f"Tipo não suportado: {type(data)}")
+        
+        prefix = raw.lstrip()[:5]
+        if prefix.startswith(b"%PDF"):
+            reader = FlatReader()
+        elif prefix.startswith(b"<?xml") or prefix.startswith(b"<"):
+            reader = UnstructuredReader()
+        else:
+            reader = DocxReader()
+        
+        bio = BytesIO(raw)
+        docs = reader.load_data(bio)
+        return "\n".join(doc.text for doc in docs)
 
     def _extract_web(self, url: str) -> str:
         """Extract text from a web page.
