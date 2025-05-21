@@ -16,7 +16,8 @@ embed = OpenAIEmbeddings(model="text-embedding-3-small", api_key=api_key)
 
 rag = Rag(embed_model=embed, chat_model=chat)
 
-rag.add_web(url="https://en.wikipedia.org/wiki/Python_(programming_language)")
+rag.add_web(url="https://pt.wikipedia.org/wiki/Python")
+rag.add_file("README.md")
 
 for chunk in rag.query("What are the main features of the Python programming language?", stream=True):
     print(chunk, end="", flush=True) 

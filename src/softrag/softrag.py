@@ -20,12 +20,14 @@ import struct
 from io import BytesIO
 from pathlib import Path
 from typing import Sequence, Dict, Any, List, Callable, Union, IO
+import re
 
 import sqlite_vec
 import trafilatura
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from llama_index.readers.file.flat import FlatReader
 from llama_index.readers.file.docs.base import DocxReader
+from llama_index.readers.file.markdown import MarkdownReader
 from llama_index.readers.file.unstructured.base import UnstructuredReader
 
 
@@ -264,38 +266,52 @@ class Rag:
             self.db.executescript(sql)
 
     def _extract_file(self, data: FileInput) -> str:
-        """Extract text from a file.
-        
+        """Extrai texto de um arquivo.
+
         Args:
-            path: Path to the file.
-            
+            data: Caminho para o arquivo ou objeto semelhante a arquivo.
+
         Returns:
-            Extracted text from the file.
-            
+            Texto extraído do arquivo.
+
         Raises:
-            ValueError: If the file type is not supported.
+            ValueError: Se o tipo de arquivo não for suportado.
         """
         if isinstance(data, (str, Path)):
-            raw = Path(data).read_bytes()
+            file_path = Path(data)
+            raw = file_path.read_bytes()
+            suffix = file_path.suffix.lower()
+            is_path = True
         elif hasattr(data, "read"):
             content = data.read()
             raw = content.encode("utf-8") if isinstance(content, str) else content
+            suffix = ""
+            is_path = False
         elif isinstance(data, (bytes, bytearray)):
             raw = bytes(data)
+            suffix = ""
+            is_path = False
         else:
             raise ValueError(f"Tipo não suportado: {type(data)}")
-        
-        prefix = raw.lstrip()[:5]
-        if prefix.startswith(b"%PDF"):
-            reader = FlatReader()
-        elif prefix.startswith(b"<?xml") or prefix.startswith(b"<"):
-            reader = UnstructuredReader()
-        else:
+
+        if suffix == ".md" and is_path:
+            reader = MarkdownReader()
+            docs = reader.load_data(file_path)
+        elif suffix == ".docx":
             reader = DocxReader()
-        
-        bio = BytesIO(raw)
-        docs = reader.load_data(bio)
+            bio = BytesIO(raw)
+            docs = reader.load_data(bio)
+        elif suffix == ".pdf":
+            reader = FlatReader()
+            bio = BytesIO(raw)
+            docs = reader.load_data(bio)
+        else:
+            reader = UnstructuredReader()
+            bio = BytesIO(raw)
+            docs = reader.load_data(bio)
+
         return "\n".join(doc.text for doc in docs)
+
 
     def _extract_web(self, url: str) -> str:
         """Extract text from a web page.
@@ -356,30 +372,29 @@ class Rag:
         Returns:
             List of relevant document texts.
         """
-        # Prepare FTS query by handling special characters
-        fts_query = " OR ".join(word for word in query.replace(",", " ").replace("?", " ").split() if len(word) > 2)
-        
-        # Check if the documents table exists and has records
+        cleaned_query = re.sub(r'[^\w\s]', '', query)
+        fts_query = " OR ".join(word for word in cleaned_query.split() if len(word) > 2)
+
         if not self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents'").fetchone():
             return ["No documents in the database. Add content using add_file() or add_web() first."]
-        
+
         count = self.db.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
         if count == 0:
             return ["The database is empty. Add content using add_file() or add_web() first."]
-            
+
         q_vec = pack_vector(self.embed_model.embed_query(query))
         sql = """
         WITH kw AS (
             SELECT id, 1.0/(bm25(docs_fts)+1) AS score
-              FROM docs_fts
-             WHERE docs_fts MATCH ?
-             LIMIT 20
+            FROM docs_fts
+            WHERE docs_fts MATCH ?
+            LIMIT 20
         ),
         vec AS (
             SELECT doc_id AS id, 1.0 - vec_distance_cosine(embedding, ?) AS score
-              FROM embeddings
-             ORDER BY score DESC
-             LIMIT 20
+            FROM embeddings
+            ORDER BY score DESC
+            LIMIT 20
         ),
         merged AS (
             SELECT id, score FROM kw
