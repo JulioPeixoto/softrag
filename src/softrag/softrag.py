@@ -64,19 +64,19 @@ def pack_vector(vec: Sequence[float]) -> bytes:
 
 
 class Rag:
-    """Lightweight RAG engine with pluggable LLM backend via dependency injection.
-    
-    This class implements a Retrieval-Augmented Generation system that
-    stores documents and their embeddings in a SQLite database, allowing
-    semantic queries and retrieval of relevant documents for use with LLMs.
-    
-    Attributes:
-        embed_model: Model to generate text embeddings.
-        chat_model: Model to generate context-based responses.
-        db_path: Path to the SQLite database file.
-        db: Connection to the SQLite database.
-    """
+    """Lightweight Retrieval-Augmented Generation (RAG) engine with pluggable
+    language model backends via dependency injection.
 
+    This class implements a RAG system that stores documents and their embeddings
+    in a SQLite database, enabling semantic queries and retrieval of relevant
+    documents for use with language models.
+
+    Attributes:
+        embed_model (EmbedFn): Model to generate text embeddings.
+        chat_model (ChatFn): Model to generate context-based responses.
+        db_path (Path): Path to the SQLite database file.
+        db (sqlite3.Connection): Connection to the SQLite database.
+    """
     def __init__(
         self, *, 
         embed_model, 
@@ -102,11 +102,11 @@ class Rag:
         self, data: FileInput, metadata: Dict[str, Any] | None = None
     ) -> None:
         """Add file content to the database.
-        
+
         Args:
-            path: Path to the file to be processed.
-            metadata: Additional metadata to be stored with the document.
-        
+            data (FileInput): Path to the file, bytes, or file-like object to be processed.
+            metadata (Dict[str, Any], optional): Additional metadata to be stored with the document.
+
         Raises:
             ValueError: If the file type is not supported.
         """
@@ -147,22 +147,18 @@ class Rag:
             return self._stream_response(prompt)
 
     def _set_splitter(self, splitter: Chunker | None = None) -> None:
-        """Configure or update the text‑chunking strategy used on ingestion.
+        """Configure or update the text-chunking strategy used during ingestion.
 
-        Parameters
-        ----------
-        splitter
-            * ``None`` – configure the default RecursiveCharacterTextSplitter
-              (``chunk_size=400``, ``chunk_overlap=100``).
-            * ``str`` – treat the string as a delimiter; empty chunks are
-              ignored.
-            * ``Callable[[str], list[str]]`` – custom function that receives the
-              full text and returns a list of non‑empty chunks.
+        Args:
+            splitter (Chunker, optional): Defines the chunking strategy.
+                - If None: Uses the default RecursiveCharacterTextSplitter with
+                chunk_size=400 and chunk_overlap=100.
+                - If str: Treats the string as a delimiter; empty chunks are ignored.
+                - If Callable[[str], List[str]]: Custom function that receives the
+                full text and returns a list of non-empty chunks.
 
-        Raises
-        ------
-        ValueError
-            If *splitter* is not of an accepted type.
+        Raises:
+            ValueError: If splitter is not of an accepted type.
         """
         if splitter is None:
             rcts = RecursiveCharacterTextSplitter(
@@ -266,16 +262,16 @@ class Rag:
             self.db.executescript(sql)
 
     def _extract_file(self, data: FileInput) -> str:
-        """Extrai texto de um arquivo.
+        """Extract text from a file.
 
         Args:
-            data: Caminho para o arquivo ou objeto semelhante a arquivo.
+            data (FileInput): Path to the file, bytes, or file-like object to be processed.
 
         Returns:
-            Texto extraído do arquivo.
+            str: Extracted text from the file.
 
         Raises:
-            ValueError: Se o tipo de arquivo não for suportado.
+            ValueError: If the file type is not supported.
         """
         if isinstance(data, (str, Path)):
             file_path = Path(data)
