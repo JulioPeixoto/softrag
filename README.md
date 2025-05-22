@@ -75,6 +75,16 @@ SoftRAG uses a hybrid approach for retrieval:
 4. **Retrieval**: Queries combine keyword search and vector similarity
 5. **Generation**: The most relevant chunks are sent to the LLM along with the question
 
+## 🛠️ Next Steps
+
+- Documentation Creation: Develop comprehensive documentation using tools like Sphinx or MkDocs to provide clear guidance on installation, usage, and contribution.
+- Image Support in RAG: Integrate capabilities to handle image data, enabling the retrieval and generation of content based on visual inputs. This could involve incorporating models like CLIP for image embeddings.
+- Automated Testing: Implement unit and integration tests using frameworks such as pytest to ensure code reliability and facilitate maintenance.
+- Support for Multiple LLM Backends: Extend compatibility to include various language model providers, such as OpenAI, Hugging Face Transformers, and local models, offering users flexibility in choosing their preferred backend.
+- Enhanced Context Retrieval: Improve the relevance of retrieved documents by integrating reranking techniques or advanced retrieval models, ensuring more accurate and contextually appropriate responses.
+- Performance Benchmarking: Conduct performance evaluations to assess Softrag's efficiency and scalability, comparing it with other RAG solutions to identify areas for optimization.
+- Monitoring and Logging: Implement logging mechanisms to track system operations and facilitate debugging, as well as monitoring tools to observe performance metrics and system health.
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit Pull Requests.
