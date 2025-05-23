@@ -49,10 +49,54 @@ For complete documentation, examples, and advanced usage, see: **[docs/softrag.m
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit Pull Requests.
+We welcome contributions! Here's how to get started:
+
+### Development Setup
+
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management. Make sure you have it installed:
+
+```bash
+# Install uv if you haven't already
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### Getting Started
+
+1. **Fork and clone the repository:**
+   ```bash
+   git clone https://github.com/yourusername/softrag.git
+   cd softrag
+   ```
+
+2. **Install dependencies with uv:**
+   ```bash
+   uv sync --dev
+   ```
+
+3. **Activate the virtual environment:**
+   ```bash
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   ```
+
+### Making Changes
+
+1. Create a new branch for your feature/fix
+2. Make your changes
+3. Add tests if applicable
+4. Ensure all tests pass
+5. Submit a pull request
+
+### Project Structure
+
+- `src/softrag/` - Main library code
+- `docs/` - Documentation
+- `examples/` - Usage examples
+- `tests/` - Test suite
 
 ## 📜 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-Developed with ❤️ for AI community
+## Give to us your star ⭐
+
+Developed with ❤️ for community
