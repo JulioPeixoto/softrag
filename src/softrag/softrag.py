@@ -288,7 +288,7 @@ class Rag:
             suffix = ""
             is_path = False
         else:
-            raise ValueError(f"Tipo não suportado: {type(data)}")
+            raise ValueError(f"Unsupported type: {type(data)}")
 
         if suffix == ".md" and is_path:
             reader = MarkdownReader()
