@@ -96,8 +96,7 @@ class Rag:
         self.db: sqlite3.Connection | None = None
         self._ensure_db()
         self._set_splitter()
-        self._ensure_db()
-        
+
     def add_file(
         self, data: FileInput, metadata: Dict[str, Any] | None = None
     ) -> None:
