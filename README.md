@@ -7,6 +7,8 @@
 Minimal **local-first** Retrieval-Augmented Generation (RAG) library powered by **SQLite + sqlite-vec**.  
 Everything—documents, embeddings, cache—lives in a single `.db` file.
 
+created by [Julio Peixoto](https://gh.com/JulioPeixoto).
+
 ---
 
 ## 🌟 Features
