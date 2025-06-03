@@ -145,6 +145,83 @@ class Rag:
         else:
             return self._stream_response(prompt)
 
+    def add_image(self, img_path: Path, metadata: Dict[str, Any] | None = None):
+        """
+        Add an image to the database.
+        
+        Args:
+            img_path: Path to the image file.
+            metadata: Additional metadata to be stored with the image.
+        
+        Raises:
+            FileNotFoundError: If the image file does not exist.
+        """
+        img_path = Path(img_path)
+        if not img_path.exists():
+            raise FileNotFoundError(f"Image file not found: {img_path}")
+
+        try:
+            caption = self._generate_image_caption(img_path)
+            
+        except Exception as e:
+            print(f"Warning: Could not generate vision caption: {e}")
+            file_stem = img_path.stem.replace('_', ' ').replace('-', ' ')
+            caption = f"Image file named '{file_stem}'"
+
+        image_metadata = {
+            **(metadata or {}),
+            "type": "image",
+            "image_path": str(img_path),
+            "filename": img_path.name
+        }
+        
+        image_text = f"""
+        Image Analysis:
+        Filename: {img_path.name}
+        Description: {caption}
+        Type: Visual content
+        """
+        
+        self._persist(image_text, image_metadata)
+
+    def _generate_image_caption(self, img_path: Path) -> str:
+        """Generate a caption for an image using GPT-4 Vision.
+
+        Args:
+            img_path (Path): Path to the image file.
+
+        Returns:
+            str: Caption for the image.
+        """
+        import base64
+        from langchain_core.messages import HumanMessage
+        
+        with open(img_path, "rb") as image_file:
+            image_data = base64.b64encode(image_file.read()).decode('utf-8')
+        
+        suffix = img_path.suffix.lower()
+        mime_type = {
+            '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+            '.png': 'image/png', '.gif': 'image/gif',
+            '.webp': 'image/webp'
+        }.get(suffix, 'image/jpeg')
+        
+        message = HumanMessage(
+            content=[
+                {
+                    "type": "text", 
+                    "text": "Describe this image in detail. Include objects, colors, setting, actions, and any text visible. Be comprehensive but concise."
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime_type};base64,{image_data}"}
+                }
+            ]
+        )
+        
+        response = self.chat_model.invoke([message])
+        return response.content if hasattr(response, 'content') else str(response)
+
     def _set_splitter(self, splitter: Chunker | None = None) -> None:
         """Configure or update the text-chunking strategy used during ingestion.
 
@@ -358,24 +435,24 @@ class Rag:
     def _retrieve(self, query: str, k: int) -> List[str]:
         """Retrieve the most relevant documents for a query.
         
-        Combines keyword search (FTS5) and vector similarity.
+        Combines keyword search (FTS5) and vector similarity from both documents and images.
         
         Args:
             query: Query to be searched.
             k: Number of documents to be returned.
             
         Returns:
-            List of relevant document texts.
+            List of relevant document texts and image captions.
         """
         cleaned_query = re.sub(r'[^\w\s]', '', query)
         fts_query = " OR ".join(word for word in cleaned_query.split() if len(word) > 2)
 
         if not self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents'").fetchone():
-            return ["No documents in the database. Add content using add_file() or add_web() first."]
+            return ["No documents in the database. Add content using add_file(), add_web(), or add_image() first."]
 
         count = self.db.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
         if count == 0:
-            return ["The database is empty. Add content using add_file() or add_web() first."]
+            return ["The database is empty. Add content using add_file(), add_web(), or add_image() first."]
 
         q_vec = pack_vector(self.embed_model.embed_query(query))
         sql = """
