@@ -17,8 +17,10 @@ created by [Julio Peixoto](https://gh.com/JulioPeixoto).
 - **SQLite + sqlite-vec** – Documents, embeddings, and cache in a single `.db` file
 - **Model-agnostic** – Works with OpenAI, Hugging Face, Ollama, or any compatible models
 - **Blazing-fast** – Optimized for minimal overhead and maximum throughput
-- **Multi-format support** – PDF, DOCX, Markdown, text files, and web pages
+- **Multi-format support** – PDF, DOCX, Markdown, text files, web pages, and **images**
+- **Image understanding** – Uses GPT-4 Vision to analyze and describe images for semantic search
 - **Hybrid retrieval** – Combines keyword search (FTS5) and semantic similarity
+- **Unified search** – Query across text documents and image descriptions seamlessly
 
 ## 🚀 Quick Start
 
@@ -36,12 +38,13 @@ rag = Rag(
     chat_model=ChatOpenAI(model="gpt-4o")
 )
 
-# Add documents
+# Add different types of content
 rag.add_file("document.pdf")
 rag.add_web("https://example.com/article")
+rag.add_image("photo.jpg")  # 🆕 Image support!
 
-# Query with context
-answer = rag.query("What is the main topic discussed?")
+# Query across all content types
+answer = rag.query("What is shown in the image and how does it relate to the document?")
 print(answer)
 ```
 
