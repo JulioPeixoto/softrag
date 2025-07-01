@@ -450,11 +450,11 @@ class Rag:
                 )
 
     def _persist(self, text: str, metadata: Dict[str, Any]) -> None:
-        """Persist text, splitting into chunks and calculating embeddings.
-
+        """Persist text content by splitting into chunks and storing with embeddings.
+        
         Args:
-            text (str): _description_
-            metadata (Dict[str, Any]): _description_
+            text (str): Raw text content to be processed and stored.
+            metadata (Dict[str, Any]): Additional metadata to associate with the text chunks.
         """
         chunks = self._splitter(text)
         chunks_with_metadata = [(chunk, metadata) for chunk in chunks]
