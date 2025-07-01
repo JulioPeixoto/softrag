@@ -402,35 +402,63 @@ class Rag:
             raise RuntimeError(f"Unable to access {url}")
         return trafilatura.extract(html, include_comments=False) or ""
 
-    def _persist(self, text: str, metadata: Dict[str, Any]) -> None:
-        """Persist text, splitting into chunks and calculating embeddings.
-        
+    def _persist_batch(self, chunks_with_metadata: List[tuple]) -> None:
+        """Persist multiple chunks in batch for better performance.
+
         Args:
-            text: Text to be stored.
-            metadata: Metadata associated with the text.
+            chunks_with_metadata (List[tuple]): List of tuples containing the chunk and its metadata.
         """
-        chunks = self._splitter(text)  
+        hashes = [sha256(chunk) for chunk, _ in chunks_with_metadata]
+        
+        existing_hashes = set()
+        if hashes:
+            placeholders = ','.join(['?' for _ in hashes])
+            existing = self.db.execute(
+                f"SELECT json_extract(metadata,'$.hash') FROM documents WHERE json_extract(metadata,'$.hash') IN ({placeholders})",
+                hashes
+            ).fetchall()
+            existing_hashes = {row[0] for row in existing}
+        
+        new_chunks = [(chunk, metadata) for chunk, metadata in chunks_with_metadata 
+                      if sha256(chunk) not in existing_hashes]
+        
+        if not new_chunks:
+            return
+        
+        texts = [chunk for chunk, _ in new_chunks]
+        if hasattr(self.embed_model, 'embed_documents'):
+            embeddings = self.embed_model.embed_documents(texts)
+        else:
+            embeddings = [self.embed_model.embed_query(text) for text in texts]
+        
         with self.db:
-            for chunk in chunks:
+            for (chunk, metadata), embedding in zip(new_chunks, embeddings):
                 h = sha256(chunk)
-                if self.db.execute(
-                    "SELECT 1 FROM documents WHERE json_extract(metadata,'$.hash')=?",
-                    (h,),
-                ).fetchone():
-                    continue
                 cur = self.db.execute(
                     "INSERT INTO documents(text, metadata) VALUES (?, ?)",
-                    (chunk, json.dumps({**metadata, "hash": h})),
+                    (chunk, json.dumps({**metadata, "hash": h}))
                 )
                 doc_id = cur.lastrowid
-                vec = pack_vector(self.embed_model.embed_query(chunk))
+                vec = pack_vector(embedding)
                 self.db.execute(
                     "INSERT INTO embeddings(doc_id, embedding) VALUES (?, ?)",
-                    (doc_id, vec),
+                    (doc_id, vec)
                 )
                 self.db.execute(
-                    "INSERT INTO docs_fts(rowid, text) VALUES (?, ?)", (doc_id, chunk)
+                    "INSERT INTO docs_fts(rowid, text) VALUES (?, ?)", 
+                    (doc_id, chunk)
                 )
+
+    def _persist(self, text: str, metadata: Dict[str, Any]) -> None:
+        """Persist text content by splitting into chunks and storing with embeddings.
+        
+        Args:
+            text (str): Raw text content to be processed and stored.
+            metadata (Dict[str, Any]): Additional metadata to associate with the text chunks.
+        """
+        chunks = self._splitter(text)
+        chunks_with_metadata = [(chunk, metadata) for chunk in chunks]
+        self._persist_batch(chunks_with_metadata)
 
     def _retrieve(self, query: str, k: int) -> List[str]:
         """Retrieve the most relevant documents for a query.

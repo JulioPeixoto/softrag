@@ -17,6 +17,8 @@ classifiers = [
 ]
 dependencies = [
     "docx2txt>=0.9",
+    "dotenv>=0.9.9",
+    "langchain-openai>=0.3.27",
     "langchain-text-splitters>=0.3.8",
     "llama-index-readers-file>=0.4.7",
     "pymupdf>=1.25.5",
