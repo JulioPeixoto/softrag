@@ -450,7 +450,7 @@ class Rag:
                 )
 
     def _persist(self, text: str, metadata: Dict[str, Any]) -> None:
-        """_summary_
+        """Persist text, splitting into chunks and calculating embeddings.
 
         Args:
             text (str): _description_
