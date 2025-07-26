@@ -4,7 +4,7 @@
   <img src="piriquito.png" width="150" alt="SoftRAG mascot – periquito"/>
 </div>
 
-Minimal **local-first** Retrieval-Augmented Generation (RAG) library powered by **SQLite + sqlite-vec**.  
+Minimal **local-first** multimodal Retrieval-Augmented Generation (RAG) library powered by **SQLite + sqlite-vec**.  
 Everything—documents, embeddings, cache—lives in a single `.db` file.
 
 created by [Julio Peixoto](https://gh.com/JulioPeixoto).
