@@ -135,13 +135,12 @@ def adapt_embedder(embedder: Any) -> Embedder:
             result = embedder(list(texts))
             return _as_rows(result)
 
-        # Chroma-style functions take a list; plain ones take a string. Probe once.
-        try:
-            probe = embedder(["softrag probe"])
-            if _looks_nested(probe):
-                return _EmbedderAdapter(embedder, _call_one, _call_many, name)
-        except Exception:
-            pass
+        # Chroma-style callables take a list of documents; plain ones take a
+        # single string. The distinction is read from the signature rather than
+        # probed, because probing a callable that wraps a paid API would spend
+        # a request just to find out what it is.
+        if _takes_a_batch(embedder):
+            return _EmbedderAdapter(embedder, _call_one, _call_many, name)
         return _EmbedderAdapter(embedder, _call_one, None, name)
 
     raise ConfigurationError(
@@ -393,6 +392,52 @@ def auto_chat_model(*, model: Optional[str] = None) -> ChatModel:
 # --------------------------------------------------------------------------- #
 # Coercion helpers
 # --------------------------------------------------------------------------- #
+
+
+def _takes_a_batch(embedder: Any) -> bool:
+    """Whether a callable embedder expects a list of texts rather than one text.
+
+    Decided from the signature: the first parameter's annotation, or a
+    Chroma-style ``input``/``texts``/``documents`` parameter name. Anything
+    unrecognised is treated as single-text, which is always safe -- batching is
+    then derived by calling it once per text.
+    """
+    import inspect
+    import typing
+
+    target = embedder if inspect.isfunction(embedder) or inspect.ismethod(embedder) else (
+        getattr(type(embedder), "__call__", embedder)
+    )
+    try:
+        signature = inspect.signature(target)
+    except (TypeError, ValueError):
+        return False
+
+    parameters = [
+        p
+        for p in signature.parameters.values()
+        if p.kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if parameters and parameters[0].name == "self":
+        parameters = parameters[1:]
+    if not parameters:
+        return False
+
+    first = parameters[0]
+    if first.name.lower() in {"input", "inputs", "texts", "documents", "docs", "batch"}:
+        return True
+
+    annotation = first.annotation
+    if annotation is inspect.Parameter.empty:
+        return False
+    if isinstance(annotation, str):
+        lowered = annotation.lower()
+        if "str]" in lowered or lowered.startswith(("list", "sequence", "iterable")):
+            return True
+        return "documents" in lowered
+    origin = typing.get_origin(annotation)
+    return origin in (list, tuple, set, Sequence) or annotation in (list, tuple)
 
 
 def _as_floats(vector: Any, name: str) -> List[float]:
