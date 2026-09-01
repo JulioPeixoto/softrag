@@ -195,3 +195,5 @@ src/softrag/_version.py
 *.db
 *.db-wal
 *.db-shm
+
+.claude/worktrees/
