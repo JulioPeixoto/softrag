@@ -46,9 +46,21 @@ __all__ = ["Store", "escape_fts_query", "pack_vector", "unpack_vector"]
 SCHEMA_VERSION = 1
 DEFAULT_PAGE_SIZE = 8192
 
-#: Above this many filter-matching rows, exact rescoring stops being worth it and
-#: we fall back to over-fetched approximate KNN followed by filtering.
-EXACT_FILTER_LIMIT = 20_000
+#: vec0 rejects a KNN query asking for more than this many neighbours:
+#: "k value in knn query too large, provided N and the limit is 4096".
+VEC0_MAX_K = 4096
+
+#: Above this many filter-matching rows, exact rescoring stops paying for
+#: itself and we fall back to over-fetched KNN followed by filtering.
+#:
+#: The number comes from measurement rather than taste. Scoring a filtered
+#: subset uses one point lookup per row (~8 us each on a 384-dimension index),
+#: while vec0's native KNN costs a flat ~7 ms over 20k vectors no matter how
+#: many neighbours are asked for. The two meet at roughly a thousand rows.
+#: Note that a single ``doc_id IN (...)`` is *not* the alternative it looks
+#: like: vec0 answers it with a full table scan, so it is slower than the
+#: native KNN it was meant to avoid.
+EXACT_FILTER_LIMIT = 1_000
 
 #: How many extra candidates to pull when post-filtering is unavoidable.
 POST_FILTER_OVERFETCH = 8
@@ -538,12 +550,14 @@ class Store:
         return len(ids)
 
     def _delete_ids(self, ids: Sequence[int]) -> None:
+        # documents is an ordinary table, so a batched IN is the cheap way to
+        # delete from it. vectors is a vec0 virtual table, where an IN forces a
+        # full scan, so it gets one keyed delete per row instead.
+        if self._vectors_ready:
+            for doc_id in ids:
+                self.db.execute("DELETE FROM vectors WHERE doc_id = ?", (doc_id,))
         for batch in _batched(ids, 500):
             placeholders = ",".join("?" for _ in batch)
-            if self._vectors_ready:
-                self.db.execute(
-                    f"DELETE FROM vectors WHERE doc_id IN ({placeholders})", batch
-                )
             self.db.execute(
                 f"DELETE FROM documents WHERE id IN ({placeholders})", batch
             )
@@ -603,19 +617,7 @@ class Store:
 
         with self._lock:
             if where is None:
-                if source is None:
-                    rows = self.db.execute(
-                        "SELECT doc_id, distance FROM vectors "
-                        "WHERE embedding MATCH ? AND k = ?",
-                        (blob, k),
-                    ).fetchall()
-                else:
-                    rows = self.db.execute(
-                        "SELECT doc_id, distance FROM vectors "
-                        "WHERE embedding MATCH ? AND k = ? AND source = ?",
-                        (blob, k, source),
-                    ).fetchall()
-                return [(int(i), float(d)) for i, d in rows if d is not None]
+                return self._native_knn(blob, k, source=source)
 
             candidates = self._filter_ids(where, source, limit=EXACT_FILTER_LIMIT + 1)
             if not candidates:
@@ -624,31 +626,67 @@ class Store:
                 return self._exact_vector_scan(blob, candidates, k)
             return self._approximate_filtered(blob, where, source, k)
 
+    def _native_knn(
+        self, blob: bytes, k: int, *, source: Optional[str] = None
+    ) -> List[Tuple[int, float]]:
+        """vec0's own KNN operator: the fast path when nothing needs filtering."""
+        capped = min(k, VEC0_MAX_K)
+        if capped < k:
+            log.warning(
+                "vec0 caps KNN at %d neighbours; returning %d instead of the "
+                "requested %d",
+                VEC0_MAX_K,
+                capped,
+                k,
+            )
+        if source is None:
+            sql = "SELECT doc_id, distance FROM vectors WHERE embedding MATCH ? AND k = ?"
+            params: Tuple[Any, ...] = (blob, capped)
+        else:
+            sql = (
+                "SELECT doc_id, distance FROM vectors "
+                "WHERE embedding MATCH ? AND k = ? AND source = ?"
+            )
+            params = (blob, capped, source)
+        rows = self.db.execute(sql, params).fetchall()
+        return [(int(i), float(d)) for i, d in rows if d is not None]
+
     def _exact_vector_scan(
         self, blob: bytes, ids: Sequence[int], k: int
     ) -> List[Tuple[int, float]]:
-        """Score a known set of rows exactly and keep the best ``k``."""
+        """Score a known set of rows exactly and keep the best ``k``.
+
+        One point lookup per row. That looks wasteful next to a single
+        ``doc_id IN (...)``, but vec0 answers an ``IN`` with a full table scan
+        while an equality on the primary key is a real lookup, which makes the
+        loop several times faster for the selective filters that reach here.
+        """
         scored: List[Tuple[int, float]] = []
-        for batch in _batched(ids, 500):
-            placeholders = ",".join("?" for _ in batch)
-            rows = self.db.execute(
-                f"SELECT doc_id, vec_distance_cosine(embedding, ?) AS distance "
-                f"FROM vectors WHERE doc_id IN ({placeholders})",
-                (blob, *batch),
-            ).fetchall()
-            scored.extend(
-                (int(i), float(d)) for i, d in rows if d is not None and not math.isnan(d)
-            )
+        for doc_id in ids:
+            row = self.db.execute(
+                "SELECT doc_id, vec_distance_cosine(embedding, ?) AS distance "
+                "FROM vectors WHERE doc_id = ?",
+                (blob, doc_id),
+            ).fetchone()
+            if row is None or row[1] is None or math.isnan(row[1]):
+                continue
+            scored.append((int(row[0]), float(row[1])))
         scored.sort(key=lambda pair: pair[1])
         return scored[:k]
 
     def _approximate_filtered(
         self, blob: bytes, where: Optional[Where], source: Optional[str], k: int
     ) -> List[Tuple[int, float]]:
-        """Fall back to over-fetched KNN, then drop non-matching rows."""
+        """Fall back to over-fetched KNN, then drop non-matching rows.
+
+        Only reached when the filter matches too many rows to rescore exactly,
+        which also means it is unselective enough that over-fetching finds
+        plenty of survivors.
+        """
         predicate, params = compile_where(where, column="d.metadata")
         source_clause = " AND d.source = ?" if source else ""
         source_params = [source] if source else []
+        overfetch = min(max(k * POST_FILTER_OVERFETCH, k), VEC0_MAX_K)
         rows = self.db.execute(
             f"""
             WITH knn AS (
@@ -661,9 +699,27 @@ class Store:
             ORDER BY knn.distance
             LIMIT ?
             """,
-            (blob, k * POST_FILTER_OVERFETCH, *params, *source_params, k),
+            (blob, overfetch, *params, *source_params, k),
         ).fetchall()
         return [(int(i), float(d)) for i, d in rows if d is not None]
+
+    def vectors_for(self, ids: Sequence[int]) -> Dict[int, List[float]]:
+        """Load stored embeddings by document id.
+
+        Point lookups again, for the same reason as :meth:`_exact_vector_scan`:
+        an ``IN`` list would make vec0 scan the whole table.
+        """
+        if not ids or not self._vectors_ready:
+            return {}
+        out: Dict[int, List[float]] = {}
+        with self._lock:
+            for doc_id in ids:
+                row = self.db.execute(
+                    "SELECT embedding FROM vectors WHERE doc_id = ?", (doc_id,)
+                ).fetchone()
+                if row is not None and row[0] is not None:
+                    out[int(doc_id)] = unpack_vector(row[0])
+        return out
 
     def search_keyword(
         self,

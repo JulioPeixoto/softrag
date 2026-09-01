@@ -18,7 +18,7 @@ import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .store import Store, unpack_vector
+from .store import Store
 from .types import Hit, Where
 
 log = logging.getLogger("softrag.retrieval")
@@ -111,23 +111,27 @@ def maximal_marginal_relevance(
     relevance = {doc_id: _dot(query_norm, vec) for doc_id, vec in pool}
 
     selected: List[int] = []
-    selected_vectors: List[Sequence[float]] = []
     remaining = dict(pool)
+    # Running maximum similarity to anything already selected. Keeping it
+    # incrementally means each round compares candidates against only the one
+    # newly selected vector, which turns the naive O(n * k^2) into O(n * k).
+    redundancy: Dict[int, float] = {doc_id: 0.0 for doc_id, _ in pool}
 
     while remaining and len(selected) < top_k:
         best_id: Optional[int] = None
         best_score = -math.inf
-        for doc_id, vec in remaining.items():
-            redundancy = max(
-                (_dot(vec, chosen) for chosen in selected_vectors), default=0.0
-            )
-            score = (1 - diversity) * relevance[doc_id] - diversity * redundancy
+        for doc_id in remaining:
+            score = (1 - diversity) * relevance[doc_id] - diversity * redundancy[doc_id]
             if score > best_score:
                 best_score, best_id = score, doc_id
         if best_id is None:
             break
         selected.append(best_id)
-        selected_vectors.append(remaining.pop(best_id))
+        chosen = remaining.pop(best_id)
+        for doc_id, vec in remaining.items():
+            similarity = _dot(vec, chosen)
+            if similarity > redundancy[doc_id]:
+                redundancy[doc_id] = similarity
 
     return selected
 
@@ -269,18 +273,11 @@ class Retriever:
         return [(doc_id, scores.get(doc_id, 0.0)) for doc_id in picked]
 
     def _load_vectors(self, ids: Sequence[int]) -> Dict[int, List[float]]:
-        if not ids or not self.store.dimensions:
-            return {}
-        placeholders = ",".join("?" for _ in ids)
         try:
-            rows = self.store.db.execute(
-                f"SELECT doc_id, embedding FROM vectors WHERE doc_id IN ({placeholders})",
-                list(ids),
-            ).fetchall()
+            return self.store.vectors_for(ids)
         except Exception as exc:  # pragma: no cover - defensive
             log.warning("could not load vectors for MMR: %s", exc)
             return {}
-        return {int(doc_id): unpack_vector(blob) for doc_id, blob in rows}
 
     def _materialise(
         self,
