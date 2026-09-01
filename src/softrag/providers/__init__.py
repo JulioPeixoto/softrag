@@ -21,6 +21,7 @@ log = logging.getLogger("softrag.providers")
 __all__ = [
     "adapt_embedder",
     "adapt_chat_model",
+    "embedder_fingerprint",
     "auto_embedder",
     "auto_chat_model",
     "HashEmbedder",
@@ -392,6 +393,36 @@ def auto_chat_model(*, model: Optional[str] = None) -> ChatModel:
 # --------------------------------------------------------------------------- #
 # Coercion helpers
 # --------------------------------------------------------------------------- #
+
+
+def embedder_fingerprint(embedder: Any) -> str:
+    """A short, stable identifier for the model behind an embedder.
+
+    Vector width alone cannot tell two embedding models apart -- plenty of them
+    are 384- or 1536-dimensional -- so an index rebuilt with a different model
+    of the same width would keep working while returning quietly meaningless
+    neighbours. Recording this alongside the width lets softrag notice.
+
+    Args:
+        embedder: An embedder, adapted or raw.
+
+    Returns:
+        Something like ``"OpenAIEmbedder:text-embedding-3-small"``, or just the
+        class name when no model attribute is exposed.
+
+    Example:
+        >>> embedder_fingerprint(HashEmbedder(dimensions=64))
+        'HashEmbedder:64'
+    """
+    target = getattr(embedder, "_target", embedder)
+    name = type(target).__name__
+    for attribute in ("model_name", "model", "model_id", "name", "dimensions"):
+        value = getattr(target, attribute, None)
+        if value is None or callable(value):
+            continue
+        if isinstance(value, (str, int)):
+            return f"{name}:{value}"
+    return name
 
 
 def _takes_a_batch(embedder: Any) -> bool:

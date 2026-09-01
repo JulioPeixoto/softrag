@@ -403,6 +403,56 @@ class Store:
             self._dimensions = dimensions
             self._vectors_ready = True
 
+    def check_embedder(self, fingerprint: str) -> Optional[str]:
+        """Record which embedding model built this index, or flag a change.
+
+        Vector width already catches the obvious mistake of swapping a 384-
+        dimension model for a 1536-dimension one. It cannot catch the quieter
+        one: two different models of the *same* width produce vectors in
+        unrelated spaces, so the index keeps answering and every neighbour it
+        returns is meaningless. Comparing a model fingerprint catches that.
+
+        This warns rather than raises, because a fingerprint can change for
+        harmless reasons -- wrapping the same model in a different adapter, for
+        instance -- and refusing to open an index over a naming detail would be
+        worse than the risk.
+
+        Args:
+            fingerprint: Identifier from
+                :func:`~softrag.providers.embedder_fingerprint`.
+
+        Returns:
+            The previously recorded fingerprint when it differs, otherwise
+            ``None``.
+        """
+        with self._lock:
+            row = self.db.execute(
+                "SELECT value FROM softrag_meta WHERE key='embedder'"
+            ).fetchone()
+            previous = row[0] if row else None
+
+            if previous is None:
+                if not self.read_only:
+                    self.db.execute(
+                        "INSERT OR REPLACE INTO softrag_meta(key, value) "
+                        "VALUES ('embedder', ?)",
+                        (fingerprint,),
+                    )
+                return None
+
+            if previous == fingerprint or self.count() == 0:
+                return None
+
+        log.warning(
+            "This index was built with embedding model %r but %r is configured "
+            "now. Vectors from different models are not comparable, so search "
+            "results will be meaningless. Re-index into a new database file, or "
+            "switch back to the original model.",
+            previous,
+            fingerprint,
+        )
+        return previous
+
     # -- writes ------------------------------------------------------------- #
 
     def upsert_source(

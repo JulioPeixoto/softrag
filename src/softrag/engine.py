@@ -32,7 +32,7 @@ from .chunking import (
     resolve_chunker,
 )
 from .errors import ConfigurationError, IngestionError
-from .providers import adapt_chat_model, adapt_embedder
+from .providers import adapt_chat_model, adapt_embedder, embedder_fingerprint
 from .retrieval import RetrievalConfig, Retriever, SearchMode
 from .store import Store
 from .types import (
@@ -185,6 +185,10 @@ class Rag:
             self._chat = adapt_chat_model(chat_model)
 
         self.store = Store(db_path)
+        self.embedder_id = embedder_fingerprint(embed_model)
+        #: Set when the index was built with a different embedding model than
+        #: the one configured now. See :meth:`softrag.store.Store.check_embedder`.
+        self.embedder_changed = self.store.check_embedder(self.embedder_id)
         self.retriever = Retriever(self.store)
         self.reranker = reranker
         self._chunker = resolve_chunker(
