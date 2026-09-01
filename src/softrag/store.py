@@ -547,6 +547,14 @@ class Store:
             self.db.execute(
                 "DELETE FROM sources WHERE source NOT IN (SELECT DISTINCT source FROM documents)"
             )
+            # A partial delete leaves surviving sources with a stale chunk
+            # count, which would then be wrong in sources() and in the CLI.
+            self.db.execute(
+                "UPDATE sources SET chunks = ("
+                "  SELECT COUNT(*) FROM documents WHERE documents.source = sources.source"
+                "), updated_at = ?",
+                (_utcnow(),),
+            )
         return len(ids)
 
     def _delete_ids(self, ids: Sequence[int]) -> None:
