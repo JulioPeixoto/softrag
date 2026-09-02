@@ -15,6 +15,7 @@ import io
 import json
 import sys
 import types
+from typing import ClassVar
 
 import pytest
 
@@ -69,7 +70,7 @@ class _StreamEvent:
 class FakeOpenAI:
     """Records every call so the request shape can be asserted."""
 
-    instances: list[FakeOpenAI] = []
+    instances: ClassVar[list] = []
 
     def __init__(self, **kwargs):
         self.init_kwargs = kwargs
@@ -233,7 +234,7 @@ class _StreamContext:
 
 
 class FakeAnthropic:
-    instances: list[FakeAnthropic] = []
+    instances: ClassVar[list] = []
 
     def __init__(self, **kwargs):
         self.init_kwargs = kwargs
