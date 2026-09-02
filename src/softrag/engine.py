@@ -187,8 +187,31 @@ class Rag:
         self._chunker = resolve_chunker(
             chunker,
             chunk_size=self.config.chunk_size,
-            chunk_overlap=self.config.chunk_overlap,
+            chunk_overlap=self._effective_overlap(),
         )
+
+    def _effective_overlap(self) -> int:
+        """Overlap that always leaves room for the chunk size in use.
+
+        ``Rag(chunk_size=150)`` is a natural thing to write, and on its own it
+        used to raise a bare ValueError from the chunker: the default overlap
+        of 200 is larger, so chunks could never advance. Shrinking the overlap
+        to a quarter of the requested size is what the caller meant, and the
+        warning says so. An overlap the caller set explicitly is never touched.
+        """
+        overlap = self.config.chunk_overlap
+        if overlap < self.config.chunk_size:
+            return overlap
+        adjusted = max(self.config.chunk_size // 4, 0)
+        log.warning(
+            "chunk_overlap (%d) is not smaller than chunk_size (%d), so chunks "
+            "could never advance; using an overlap of %d instead. Set "
+            "chunk_overlap explicitly to silence this.",
+            overlap,
+            self.config.chunk_size,
+            adjusted,
+        )
+        return adjusted
 
     # -- lifecycle ---------------------------------------------------------- #
 
@@ -549,7 +572,7 @@ class Rag:
             resolve_chunker(
                 chunker,
                 chunk_size=self.config.chunk_size,
-                chunk_overlap=self.config.chunk_overlap,
+                chunk_overlap=self._effective_overlap(),
             )
             if chunker is not None
             else self._chunker

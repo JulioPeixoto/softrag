@@ -176,18 +176,6 @@ def test_expansion_falls_back_when_nothing_can_be_parsed(reply):
     ]
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BUG: src/softrag/transforms.py:199 -- _parse_variants() parses the JSON "
-        "array, finds it empty, and then falls through to the line-based parser, "
-        "which returns the raw text '[]' as if it were a rewrite. A model "
-        "answering with an empty array is saying 'no rewrites', so the literal "
-        "brackets end up being searched for and fused into the results. "
-        "Reproduce: expand_query('q', chat) where the model replies '[]' returns "
-        "['q', '[]'] instead of ['q']."
-    ),
-    strict=True,
-)
 def test_an_empty_json_array_means_no_rewrites():
     assert expand_query("the original question", CannedChat("[]")) == [
         "the original question"

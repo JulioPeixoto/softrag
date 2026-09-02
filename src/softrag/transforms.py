@@ -195,8 +195,10 @@ def _parse_variants(reply: Any) -> list[str]:
         if isinstance(payload, list):
             items = [str(item).strip() for item in payload if isinstance(item, str)]
             items = [item for item in items if item]
-            if items:
-                return items
+            # A valid but empty array is the model saying "no rewrites", which
+            # is an answer. Falling through to the line parser here would hand
+            # back the literal string "[]" as though it were a query.
+            return items
 
     lines = []
     for raw in text.splitlines():
