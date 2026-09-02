@@ -107,10 +107,16 @@ def test_searching_while_a_write_is_in_flight_never_raises(rag: Rag):
     def reader() -> int:
         seen = 0
         try:
-            while not stop.is_set():
+            # At least one round runs unconditionally. Checking `stop` first
+            # made this flaky: on a fast machine the writer could finish all 30
+            # inserts before any reader completed a round, and the assertion
+            # that readers had run would fail even though nothing was wrong.
+            while True:
                 for mode in ("hybrid", "vector", "keyword"):
                     rag.search("refunds returns", mode=mode, top_k=3)
                 seen += 1
+                if stop.is_set():
+                    break
         except BaseException as exc:
             errors.append(exc)
         return seen
@@ -142,8 +148,13 @@ def test_deleting_while_searching_never_raises(rag: Rag):
 
     def searcher() -> None:
         try:
-            while not stop.is_set():
+            # One search runs unconditionally: if the deleter finishes first,
+            # a `while not stop` loop would exit having searched nothing at all
+            # and the test would pass without testing anything.
+            while True:
                 rag.search("refunds", top_k=5)
+                if stop.is_set():
+                    break
         except BaseException as exc:
             errors.append(exc)
 
