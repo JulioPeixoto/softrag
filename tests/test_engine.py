@@ -13,11 +13,10 @@ from typing import Any
 
 import pytest
 
+from conftest import DIM, FakeEmbedder, OrderingReranker, RecordingChatModel
 from softrag import Answer, EchoChatModel, HashEmbedder, Rag, RagConfig, StreamingAnswer
 from softrag.engine import DEFAULT_PROMPT, connect, format_context
 from softrag.errors import ConfigurationError, IngestionError
-
-from .conftest import DIM, FakeEmbedder, OrderingReranker, RecordingChatModel
 
 # --------------------------------------------------------------------------- #
 # add() dispatch
@@ -175,6 +174,15 @@ def test_appended_chunks_get_fresh_indices(rag: Rag):
     assert len(indices) == 2
 
 
+def test_the_next_chunk_index_continues_where_a_source_left_off(rag: Rag):
+    assert rag.store.next_chunk_index("doc") == 0
+    rag.add_text("alpha content", name="doc")
+    assert rag.store.next_chunk_index("doc") == 1
+    rag.add_text("beta content", name="doc", on_change="append")
+    assert rag.store.next_chunk_index("doc") == 2
+    assert rag.store.next_chunk_index("never-indexed") == 0
+
+
 def test_unknown_on_change_is_a_configuration_error(rag: Rag):
     with pytest.raises(ConfigurationError):
         rag.add_text("content", name="doc", on_change="merge")
@@ -214,7 +222,10 @@ def test_add_many_on_an_empty_iterable_does_nothing(rag: Rag):
 
 def test_add_many_reports_progress(rag: Rag):
     seen: list[tuple[str, int, int]] = []
-    rag.add_many(["first document text", "second document text"], on_progress=lambda *a: seen.append(a))
+    rag.add_many(
+        ["first document text", "second document text"],
+        on_progress=lambda *a: seen.append(a),
+    )
     assert len(seen) == 2
     assert [done for _, done, _ in seen] == [1, 2]
     assert {total for _, _, total in seen} == {2}
@@ -285,8 +296,9 @@ def test_streaming_falls_back_to_a_single_chunk_without_stream(corpus: Rag):
     assert list(streaming) == ["one shot answer"]
 
 
-def test_the_prompt_contains_the_context_and_the_question(recording_rag: Rag):
-    recorder: RecordingChatModel = recording_rag._chat  # type: ignore[assignment]
+def test_the_prompt_contains_the_context_and_the_question(
+    recording_rag: Rag, recorder: RecordingChatModel
+):
     recording_rag.add_text(
         "The refund policy allows returns within thirty days.", name="handbook"
     )
@@ -300,13 +312,12 @@ def test_the_prompt_contains_the_context_and_the_question(recording_rag: Rag):
     assert "(handbook)" in prompt
 
 
-def test_a_custom_prompt_template_is_used(recording_rag: Rag):
-    recorder: RecordingChatModel = recording_rag._chat  # type: ignore[assignment]
+def test_a_custom_prompt_template_is_used(
+    recording_rag: Rag, recorder: RecordingChatModel
+):
     recording_rag.add_text("mitochondria produce ATP", name="biology")
 
-    recording_rag.query(
-        "what makes ATP?", prompt="CTX<{context}>END Q<{question}>"
-    )
+    recording_rag.query("what makes ATP?", prompt="CTX<{context}>END Q<{question}>")
 
     assert recorder.prompt.startswith("CTX<")
     assert recorder.prompt.endswith("Q<what makes ATP?>")
@@ -420,10 +431,10 @@ def test_close_is_idempotent(tmp_path):
 
 
 def test_kwargs_override_the_config(make_engine):
-    engine = make_engine(top_k=11, diversity=0.5, chunk_size=123)
+    engine = make_engine(top_k=11, diversity=0.5, chunk_size=1234)
     assert engine.config.top_k == 11
     assert engine.config.diversity == 0.5
-    assert engine.config.chunk_size == 123
+    assert engine.config.chunk_size == 1234
 
 
 def test_an_unknown_option_is_a_configuration_error(make_engine):
@@ -487,7 +498,9 @@ def _reranked_engine(make_engine, order: Sequence[str]):
     reranker = OrderingReranker(order)
     engine = make_engine(reranker=reranker, top_k=3)
     for source in ("handbook", "changelog", "biology", "cooking"):
-        engine.add_text(f"a document about {source} and shared retrieval words", name=source)
+        engine.add_text(
+            f"a document about {source} and shared retrieval words", name=source
+        )
     return engine, reranker
 
 
@@ -565,11 +578,15 @@ def test_reopening_with_a_different_model_of_the_same_width_is_flagged(tmp_path)
 
 def test_reopening_with_the_same_model_is_not_flagged(tmp_path):
     path = str(tmp_path / "kb.db")
-    first = Rag(db_path=path, embed_model=HashEmbedder(dimensions=DIM), chat_model=EchoChatModel())
+    first = Rag(
+        db_path=path, embed_model=HashEmbedder(dimensions=DIM), chat_model=EchoChatModel()
+    )
     first.add_text("indexed with the hash embedder", name="doc")
     first.close()
 
-    second = Rag(db_path=path, embed_model=HashEmbedder(dimensions=DIM), chat_model=EchoChatModel())
+    second = Rag(
+        db_path=path, embed_model=HashEmbedder(dimensions=DIM), chat_model=EchoChatModel()
+    )
     try:
         assert second.embedder_changed is None
     finally:
@@ -617,7 +634,9 @@ def test_documents_are_embedded_in_batches(make_engine):
             return self.inner.embed_documents(texts)
 
     embedder = Counting()
-    engine = make_engine(embed_model=embedder, embed_batch_size=2, chunk_size=40, chunk_overlap=0)
+    engine = make_engine(
+        embed_model=embedder, embed_batch_size=2, chunk_size=40, chunk_overlap=0
+    )
     engine.add_text(" ".join(f"paragraph{i} filler words here" for i in range(8)))
 
     assert embedder.batch_sizes
