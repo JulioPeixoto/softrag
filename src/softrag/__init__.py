@@ -23,6 +23,12 @@ from __future__ import annotations
 
 import logging
 
+# Imported eagerly so the documented
+# ``softrag.ingest.EXTRACTORS[".rtf"] = fn`` works after a bare
+# ``import softrag``. It costs about 4 ms and pulls only standard-library
+# modules. ``providers`` and ``stopwords`` bind themselves via the imports
+# below.
+from . import ingest
 from .aengine import AsyncRag, AsyncStreamingAnswer, connect_async
 from .chunking import (
     MarkdownChunker,
@@ -122,6 +128,7 @@ __all__ = [
     "EchoChatModel",
     "adapt_embedder",
     "adapt_chat_model",
+    "ingest",
     # Errors
     "SoftragError",
     "ConfigurationError",
