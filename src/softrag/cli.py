@@ -1152,10 +1152,20 @@ def _predicted_backends() -> tuple[str, str]:
     Determined by inspecting the environment rather than by constructing the
     backends, so ``doctor`` never downloads a model or spends an API call.
     """
+    from .providers import anthropic as anthropic_provider
     from .providers import ollama as ollama_provider
+    from .providers import openai as openai_provider
 
     ollama_up = ollama_provider.is_available()
-    if os.getenv("OPENAI_API_KEY"):
+    # A key is not enough: auto-detection skips a backend whose SDK is missing,
+    # and a verdict that promised OpenAI while `pip install softrag` had pulled
+    # no SDK would be exactly backwards.
+    openai_ready = bool(os.getenv("OPENAI_API_KEY")) and openai_provider.is_available()
+    anthropic_ready = (
+        bool(os.getenv("ANTHROPIC_API_KEY")) and anthropic_provider.is_available()
+    )
+
+    if openai_ready:
         embedder = "OpenAIEmbedder (text-embedding-3-small)"
     elif ollama_up:
         embedder = "OllamaEmbedder (nomic-embed-text)"
@@ -1164,9 +1174,9 @@ def _predicted_backends() -> tuple[str, str]:
     else:
         embedder = "HashEmbedder (fallback -- poor retrieval quality)"
 
-    if os.getenv("ANTHROPIC_API_KEY"):
+    if anthropic_ready:
         chat = "AnthropicChat (claude-sonnet-5)"
-    elif os.getenv("OPENAI_API_KEY"):
+    elif openai_ready:
         chat = "OpenAIChat (gpt-4.1-mini)"
     elif ollama_up:
         chat = "OllamaChat (llama3.2)"

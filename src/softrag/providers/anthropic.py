@@ -6,13 +6,19 @@ vision only. Pair it with any embedder -- OpenAI, Ollama or a local model.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 from collections.abc import Iterator
 from typing import Any
 
 from ..errors import ChatError, ConfigurationError, MissingDependencyError
 
-__all__ = ["AnthropicChat"]
+__all__ = ["AnthropicChat", "is_available"]
+
+def is_available() -> bool:
+    """Whether the ``anthropic`` SDK is importable."""
+    return importlib.util.find_spec("anthropic") is not None
+
 
 DEFAULT_MODEL = "claude-sonnet-5"
 DEFAULT_MAX_TOKENS = 2048

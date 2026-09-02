@@ -337,8 +337,20 @@ def auto_embedder(*, model: str | None = None) -> Embedder:
     from . import openai as openai_provider
 
     if os.getenv("OPENAI_API_KEY"):
-        log.debug("auto-detected OpenAI embeddings")
-        return openai_provider.OpenAIEmbedder(model=model or "text-embedding-3-small")
+        if openai_provider.is_available():
+            log.debug("auto-detected OpenAI embeddings")
+            return openai_provider.OpenAIEmbedder(
+                model=model or "text-embedding-3-small"
+            )
+        # A key in the environment without the SDK installed is a common
+        # combination -- the key lives in a shell profile, and `pip install
+        # softrag` pulls no vendor SDKs. Falling through beats failing, so
+        # long as we say why.
+        log.warning(
+            "OPENAI_API_KEY is set but the 'openai' package is not installed, "
+            "so OpenAI embeddings cannot be used. Install it with: "
+            "pip install 'softrag[openai]'"
+        )
 
     if ollama_provider.is_available():
         log.debug("auto-detected a running Ollama daemon")
@@ -374,12 +386,22 @@ def auto_chat_model(*, model: str | None = None) -> ChatModel:
     from . import openai as openai_provider
 
     if os.getenv("ANTHROPIC_API_KEY"):
-        log.debug("auto-detected Anthropic")
-        return anthropic_provider.AnthropicChat(model=model or "claude-sonnet-5")
+        if anthropic_provider.is_available():
+            log.debug("auto-detected Anthropic")
+            return anthropic_provider.AnthropicChat(model=model or "claude-sonnet-5")
+        log.warning(
+            "ANTHROPIC_API_KEY is set but the 'anthropic' package is not "
+            "installed. Install it with: pip install 'softrag[anthropic]'"
+        )
 
     if os.getenv("OPENAI_API_KEY"):
-        log.debug("auto-detected OpenAI")
-        return openai_provider.OpenAIChat(model=model or "gpt-4.1-mini")
+        if openai_provider.is_available():
+            log.debug("auto-detected OpenAI")
+            return openai_provider.OpenAIChat(model=model or "gpt-4.1-mini")
+        log.warning(
+            "OPENAI_API_KEY is set but the 'openai' package is not installed. "
+            "Install it with: pip install 'softrag[openai]'"
+        )
 
     if ollama_provider.is_available():
         log.debug("auto-detected a running Ollama daemon")

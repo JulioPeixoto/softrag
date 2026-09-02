@@ -7,6 +7,7 @@ a whole orchestration framework.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 from collections.abc import Iterator, Sequence
 from typing import Any
@@ -14,6 +15,15 @@ from typing import Any
 from ..errors import ChatError, ConfigurationError, EmbeddingError, MissingDependencyError
 
 __all__ = ["OpenAIChat", "OpenAIEmbedder"]
+
+def is_available() -> bool:
+    """Whether the ``openai`` SDK is importable.
+
+    Checked with :mod:`importlib.util` rather than a real import, so
+    auto-detection stays cheap.
+    """
+    return importlib.util.find_spec("openai") is not None
+
 
 DEFAULT_EMBED_MODEL = "text-embedding-3-small"
 DEFAULT_CHAT_MODEL = "gpt-4.1-mini"
