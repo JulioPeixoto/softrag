@@ -193,6 +193,63 @@ len(rag)                                  # chunk count
 rag.close()                               # or use Rag as a context manager
 ```
 
+## Command line
+
+The package installs a `softrag` command. It is the same engine, so an index
+built from the CLI is the same file your code opens.
+
+```bash
+softrag add ./docs --pattern '**/*.md' --metadata team=platform
+softrag add https://example.com/changelog
+softrag search "refund window" --top-k 5
+softrag query "What changed in the refund policy?"        # streams by default
+softrag ls                                                # what is indexed
+softrag rm handbook.pdf
+softrag stats
+softrag shell                                             # interactive Q&A
+softrag doctor                                            # what is installed and reachable
+```
+
+`--db` (or `SOFTRAG_DB`) picks the index file; `--json` makes `search`, `ls`
+and `stats` machine-readable; `--where` takes the same filter DSL as the Python
+API. To try it with no key, no network and no model download:
+
+```bash
+softrag --provider hash --db demo.db add ./docs
+softrag --provider hash --db demo.db search "anything"
+```
+
+That pairs the built-in hash embedder with a chat model that echoes the
+retrieved context instead of generating, which also makes it a good way to see
+exactly what a real model would have been handed.
+
+## Async
+
+`AsyncRag` mirrors `Rag` method for method, for use inside an async application:
+
+```python
+import softrag
+
+async def main():
+    async with softrag.AsyncRag(db_path="kb.db") as rag:
+        await rag.add_many(["a.pdf", "b.md", "https://example.com"])
+
+        answer = await rag.query("What changed?")
+        print(answer, answer.sources)
+
+        stream = await rag.query("Summarise it", stream=True)
+        async for delta in stream:
+            print(delta, end="", flush=True)
+```
+
+Stated plainly, because "async" gets oversold: SQLite has no async driver and
+most embedding SDKs are synchronous, so the blocking work runs in a worker
+thread. That is the part that matters in an async application — your event loop
+stays free to serve other requests while an embedding call or a disk read is in
+flight — and where a backend does offer native coroutines, they are used
+directly. `add_many` fans out with bounded concurrency so a large ingest cannot
+open hundreds of connections to an embedding API at once.
+
 ## Metadata filtering
 
 Filters are plain dicts, compiled to parameterised SQL over the JSON metadata
@@ -317,12 +374,18 @@ ZIP archives of XML, and softrag unzips them itself. Only PDF needs a
 third-party parser. Unknown extensions that look like text are read as text, and
 `softrag.ingest.EXTRACTORS[".rtf"] = my_extractor` teaches it a new format.
 
-## What's included
+## Also included
 
-Beyond the engine, the package ships a `softrag` command-line interface
-(`softrag[cli]`) plus `softrag.rerank`, `softrag.eval` and `softrag.transforms`
-modules for second-stage reranking, retrieval evaluation and query
-transformation. Those are documented separately.
+`softrag.rerank` adds a second stage over the first-stage results: a local
+cross-encoder, an LLM, Cohere, tuned score fusion, or near-duplicate removal.
+`softrag.eval` measures retrieval with recall, MRR and nDCG against your own
+labelled queries, and `compare()` A/B-tests search settings so tuning is a
+measurement rather than an argument. `softrag.transforms` has HyDE, multi-query
+expansion, and Anthropic's contextual retrieval as an opt-in ingest stage.
+
+`benchmarks/` measures throughput, latency and retrieval quality, and records
+[what it found](benchmarks/README.md) — including the case where hybrid search
+loses to vector-only.
 
 ## Documentation
 
