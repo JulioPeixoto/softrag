@@ -23,15 +23,14 @@ from __future__ import annotations
 
 import logging
 
+from .aengine import AsyncRag, AsyncStreamingAnswer, connect_async
 from .chunking import (
     MarkdownChunker,
     RecursiveChunker,
     SentenceChunker,
     by_separator,
 )
-from .aengine import AsyncRag, AsyncStreamingAnswer, connect_async
 from .engine import DEFAULT_PROMPT, Rag, RagConfig, connect
-from .eval import EvalResult, compare, evaluate, evaluate_engine
 from .errors import (
     ChatError,
     ConfigurationError,
@@ -46,6 +45,7 @@ from .errors import (
     StoreError,
     UnsupportedFormatError,
 )
+from .eval import EvalResult, compare, evaluate, evaluate_engine
 from .providers import EchoChatModel, HashEmbedder, adapt_chat_model, adapt_embedder
 from .rerank import (
     ChainReranker,

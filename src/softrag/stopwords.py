@@ -26,7 +26,7 @@ from __future__ import annotations
 
 __all__ = ["STOPWORDS", "ENGLISH", "PORTUGUESE", "is_stopword"]
 
-ENGLISH = frozenset(
+ENGLISH = frozenset(  # noqa: SIM905
     """
     a about above after again against all am an and any are aren't as at
     be because been before being below between both but by
@@ -52,7 +52,7 @@ ENGLISH = frozenset(
     """.split()
 )
 
-PORTUGUESE = frozenset(
+PORTUGUESE = frozenset(  # noqa: SIM905
     """
     a ao aos aquela aquelas aquele aqueles aquilo as ate até
     com como
