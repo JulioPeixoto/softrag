@@ -189,3 +189,11 @@ pyrightconfig.json
 .vscode/
 
 src/softrag/_version.py
+
+# softrag
+.venv/
+*.db
+*.db-wal
+*.db-shm
+
+.claude/worktrees/

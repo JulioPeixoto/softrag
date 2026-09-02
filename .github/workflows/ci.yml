@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [master, v0.2]
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # macOS runners have a system Python whose sqlite3 cannot load extensions,
+  # which sqlite-vec needs. uv's own builds can, so insist on those.
+  UV_PYTHON_PREFERENCE: only-managed
+
+jobs:
+  test:
+    name: test ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          # The store touches platform-specific behaviour -- WAL, file locking,
+          # clock granularity -- so both other platforms get a run.
+          - os: macos-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      # A virtual environment, not --system: the runners' system Python is
+      # externally managed (PEP 668) on Linux and macOS, which uv refuses to
+      # install into. `uv run` picks .venv up automatically.
+      - name: Create the environment
+        run: uv venv --python ${{ matrix.python }}
+
+      - name: Install the package and test dependencies
+        run: uv pip install -e . pytest pytest-cov
+
+      - name: Run tests
+        run: uv run pytest -q --cov=softrag --cov-report=term-missing
+
+      - name: Verify the package imports from an installed wheel
+        # Catches the packaging mistakes a source-tree run cannot see: a module
+        # missing from the wheel, or py.typed not being shipped.
+        # bash on every platform, so the wheel glob expands the same way.
+        shell: bash
+        run: |
+          uv build --wheel --out-dir dist-check
+          uv run --isolated --no-project --with dist-check/*.whl python -c "
+          import softrag, importlib.resources as r
+          assert (r.files('softrag') / 'py.typed').is_file(), 'py.typed missing'
+          import softrag.cli, softrag.eval, softrag.rerank, softrag.transforms
+          print('wheel OK', softrag.__version__)
+          "
+
+  lint:
+    name: lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Create the environment
+        run: uv venv --python 3.12
+
+      - name: Install tooling
+        run: uv pip install -e . ruff mypy pytest
+
+      - name: ruff check
+        run: uv run ruff check src tests benchmarks examples
+
+      - name: ruff format
+        run: uv run ruff format --check src tests benchmarks examples
+
+      - name: mypy
+        run: uv run mypy src/softrag
+
+  build:
+    name: build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build sdist and wheel
+        run: uv build --out-dir dist
+
+      - name: Check metadata
+        run: uvx twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
