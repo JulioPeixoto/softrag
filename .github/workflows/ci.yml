@@ -13,6 +13,11 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # macOS runners have a system Python whose sqlite3 cannot load extensions,
+  # which sqlite-vec needs. uv's own builds can, so insist on those.
+  UV_PYTHON_PREFERENCE: only-managed
+
 jobs:
   test:
     name: test ${{ matrix.python }} on ${{ matrix.os }}

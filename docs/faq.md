@@ -34,6 +34,28 @@ At 1M chunks with 1536-dimensional vectors the file is roughly 6 GB, most of it
 vectors. Smaller embeddings help proportionally — see
 [storage cost](architecture.md#storage-cost).
 
+## softrag will not start: "Could not load the sqlite-vec extension"
+
+Your Python's `sqlite3` was built without extension loading. It is almost
+always the system Python on macOS: Apple compiles SQLite with extension support
+turned off, so `sqlite3.Connection` has no `enable_load_extension` at all.
+
+Easiest fix, no code change:
+
+```bash
+pip install pysqlite3-binary
+```
+
+softrag detects that automatically and connects through it instead. Otherwise
+use a Python that was not built that way -- python.org, `uv python install`,
+Homebrew, or conda-forge all work.
+
+Check what you have with:
+
+```bash
+softrag doctor
+```
+
 ## Is it thread safe?
 
 Yes, within one process. The connection is opened with

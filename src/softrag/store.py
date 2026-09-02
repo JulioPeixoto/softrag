@@ -148,6 +148,31 @@ def escape_fts_query(text: str, *, prefix: bool = False) -> str:
     return " OR ".join(quoted)
 
 
+def _sqlite_driver() -> Any:
+    """The sqlite3-compatible module to connect through.
+
+    The standard library's is used whenever it can load extensions. When it
+    cannot -- the usual state of the system Python on macOS, where Apple builds
+    SQLite with extension loading compiled out -- ``pysqlite3`` is used instead
+    if it is installed, since ``pip install pysqlite3-binary`` ships a modern
+    SQLite that can. Falling back here means a user on that Python only has to
+    install a package, not rebuild their interpreter.
+
+    Returns:
+        A module exposing ``connect``. Falls back to :mod:`sqlite3` when there
+        is no better option, so extension loading fails later with a message
+        that explains the fix.
+    """
+    if hasattr(sqlite3.Connection, "enable_load_extension"):
+        return sqlite3
+    try:
+        import pysqlite3  # type: ignore[import-not-found]
+    except ImportError:
+        return sqlite3
+    log.debug("stdlib sqlite3 cannot load extensions; using pysqlite3 instead")
+    return pysqlite3
+
+
 _clock_lock = threading.Lock()
 _last_timestamp = ""
 
@@ -221,8 +246,9 @@ class Store:
         self._is_new = (
             is_memory or not self.path.exists() or self.path.stat().st_size == 0
         )
+        driver = _sqlite_driver()
         try:
-            return sqlite3.connect(
+            return driver.connect(
                 str(self.path),
                 timeout=timeout,
                 check_same_thread=False,
@@ -257,9 +283,19 @@ class Store:
             sqlite_vec.load(self.db)
         except (AttributeError, sqlite3.Error) as exc:
             raise StoreError(
-                "Could not load the sqlite-vec extension. Your Python was likely "
-                "built against a SQLite without extension support "
-                f"(sqlite {sqlite3.sqlite_version}). Original error: {exc}"
+                "Could not load the sqlite-vec extension, which softrag needs "
+                "for vector search.\n\n"
+                f"This Python's sqlite3 (version {sqlite3.sqlite_version}) was "
+                "built without extension support. It is the usual state of the "
+                "system Python on macOS, where Apple's bundled SQLite has "
+                "extension loading compiled out.\n\n"
+                "Any one of these fixes it:\n"
+                "  * pip install pysqlite3-binary   (softrag picks it up "
+                "automatically, no code change)\n"
+                "  * use a python.org, uv-managed or Homebrew Python instead of "
+                "the system one\n"
+                "  * conda install -c conda-forge python\n\n"
+                f"Original error: {exc}"
             ) from exc
         finally:
             with contextlib.suppress(AttributeError, sqlite3.Error):
