@@ -108,6 +108,7 @@ ignore = [
     "B008",   # function calls in argument defaults are fine for our dataclasses
     "SIM108", # ternaries are not always clearer
     "RUF022", # __all__ is grouped by role, which reads better than alphabetical
+    "SIM905", # the stopword lists are prose a human edits, not literals
 ]
 
 [tool.ruff.lint.per-file-ignores]
