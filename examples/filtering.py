@@ -17,21 +17,64 @@ from __future__ import annotations
 import softrag
 
 REPORTS = [
-    ("q1-2024", "Q1 2024 revenue grew 12 percent year over year.",
-     {"year": 2024, "quarter": 1, "team": "finance", "pages": 14,
-      "tags": ["revenue", "public"], "author": "ada"}),
-    ("q2-2024", "Q2 2024 revenue was flat against a strong comparison quarter.",
-     {"year": 2024, "quarter": 2, "team": "finance", "pages": 9,
-      "tags": ["revenue"], "author": "ada"}),
-    ("q1-2025", "Q1 2025 revenue grew 8 percent, driven by the EU region.",
-     {"year": 2025, "quarter": 1, "team": "finance", "pages": 22,
-      "tags": ["revenue", "public"], "status": "draft"}),
-    ("hiring-2025", "Engineering hired four people in the first half of 2025.",
-     {"year": 2025, "team": "engineering", "pages": 3,
-      "tags": ["headcount"], "author": "grace"}),
-    ("infra-2025", "The platform migration to the new region finished in June.",
-     {"year": 2025, "team": "engineering", "pages": 31,
-      "tags": ["infrastructure"], "status": "final"}),
+    (
+        "q1-2024",
+        "Q1 2024 revenue grew 12 percent year over year.",
+        {
+            "year": 2024,
+            "quarter": 1,
+            "team": "finance",
+            "pages": 14,
+            "tags": ["revenue", "public"],
+            "author": "ada",
+        },
+    ),
+    (
+        "q2-2024",
+        "Q2 2024 revenue was flat against a strong comparison quarter.",
+        {
+            "year": 2024,
+            "quarter": 2,
+            "team": "finance",
+            "pages": 9,
+            "tags": ["revenue"],
+            "author": "ada",
+        },
+    ),
+    (
+        "q1-2025",
+        "Q1 2025 revenue grew 8 percent, driven by the EU region.",
+        {
+            "year": 2025,
+            "quarter": 1,
+            "team": "finance",
+            "pages": 22,
+            "tags": ["revenue", "public"],
+            "status": "draft",
+        },
+    ),
+    (
+        "hiring-2025",
+        "Engineering hired four people in the first half of 2025.",
+        {
+            "year": 2025,
+            "team": "engineering",
+            "pages": 3,
+            "tags": ["headcount"],
+            "author": "grace",
+        },
+    ),
+    (
+        "infra-2025",
+        "The platform migration to the new region finished in June.",
+        {
+            "year": 2025,
+            "team": "engineering",
+            "pages": 31,
+            "tags": ["infrastructure"],
+            "status": "final",
+        },
+    ),
 ]
 
 QUERY = "revenue growth and headcount"
@@ -74,14 +117,26 @@ def main() -> None:
     show(rag, '{"status": {"$exists": False}}', {"status": {"$exists": False}})
 
     print("\n== Composition ==")
-    show(rag, '{"team": "finance", "year": 2024}   (implicit AND)',
-         {"team": "finance", "year": 2024})
-    show(rag, '{"year": {"$gte": 2024, "$lt": 2025}}   (a range)',
-         {"year": {"$gte": 2024, "$lt": 2025}})
-    show(rag, '{"$and": [{"team": "finance"}, {"pages": {"$gt": 10}}]}',
-         {"$and": [{"team": "finance"}, {"pages": {"$gt": 10}}]})
-    show(rag, '{"$or": [{"team": "engineering"}, {"quarter": 1}]}',
-         {"$or": [{"team": "engineering"}, {"quarter": 1}]})
+    show(
+        rag,
+        '{"team": "finance", "year": 2024}   (implicit AND)',
+        {"team": "finance", "year": 2024},
+    )
+    show(
+        rag,
+        '{"year": {"$gte": 2024, "$lt": 2025}}   (a range)',
+        {"year": {"$gte": 2024, "$lt": 2025}},
+    )
+    show(
+        rag,
+        '{"$and": [{"team": "finance"}, {"pages": {"$gt": 10}}]}',
+        {"$and": [{"team": "finance"}, {"pages": {"$gt": 10}}]},
+    )
+    show(
+        rag,
+        '{"$or": [{"team": "engineering"}, {"quarter": 1}]}',
+        {"$or": [{"team": "engineering"}, {"quarter": 1}]},
+    )
     show(rag, '{"$not": {"team": "finance"}}', {"$not": {"team": "finance"}})
 
     print("\n== Filters apply to delete() too ==")

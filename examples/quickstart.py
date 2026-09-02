@@ -47,16 +47,22 @@ def main() -> None:
     print("== Ingest ==")
     for name, text in DOCUMENTS.items():
         result = rag.add_text(text, name=name, metadata={"kind": "policy"})
-        print(f"  {result.source:<9} added={result.chunks_added} chars={result.characters}")
+        print(
+            f"  {result.source:<9} added={result.chunks_added} chars={result.characters}"
+        )
 
     stats = rag.stats()
-    print(f"  -> {stats.documents} chunks from {stats.sources} sources, "
-          f"dim={stats.dimensions}, schema v{stats.schema_version}")
+    print(
+        f"  -> {stats.documents} chunks from {stats.sources} sources, "
+        f"dim={stats.dimensions}, schema v{stats.schema_version}"
+    )
 
     print("\n== Re-ingest is free ==")
     again = rag.add_text(DOCUMENTS["refunds"], name="refunds")
-    print(f"  added={again.chunks_added} skipped={again.chunks_skipped} "
-          "(content unchanged, nothing was re-embedded)")
+    print(
+        f"  added={again.chunks_added} skipped={again.chunks_skipped} "
+        "(content unchanged, nothing was re-embedded)"
+    )
 
     print("\n== search(): hybrid, and what each retriever contributed ==")
     for hit in rag.search("how long do refunds take", top_k=3):

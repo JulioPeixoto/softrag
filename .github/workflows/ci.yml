@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [master, v0.2]
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Keep every job offline: auto-detection must never reach for a backend, and
+  # no test is allowed to depend on one.
+  SOFTRAG_TEST_OFFLINE: "1"
+
+jobs:
+  test:
+    name: test ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          # The store touches platform-specific behaviour -- WAL, file locking,
+          # clock granularity -- so both other platforms get a run.
+          - os: macos-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Set up Python ${{ matrix.python }}
+        run: uv python install ${{ matrix.python }}
+
+      - name: Install the package and test dependencies
+        run: uv pip install --system -e . pytest pytest-cov
+
+      - name: Run tests
+        run: python -m pytest -q --cov=softrag --cov-report=term-missing
+
+      - name: Verify the package imports from an installed wheel
+        # Catches the packaging mistakes a source-tree test run cannot: a module
+        # missing from the wheel, or py.typed not being shipped.
+        run: |
+          uv build --wheel --out-dir dist-check
+          python -c "import softrag, pathlib, sys; print(softrag.__version__)"
+
+  lint:
+    name: lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Install tooling
+        run: uv pip install --system -e . ruff mypy pytest
+
+      - name: ruff check
+        run: ruff check src tests benchmarks
+
+      - name: ruff format
+        run: ruff format --check src tests benchmarks
+
+      - name: mypy
+        # Not yet blocking: the codebase is typed but not strict-clean, and a
+        # red X on every PR for that would train people to ignore it.
+        continue-on-error: true
+        run: mypy src/softrag
+
+  build:
+    name: build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build sdist and wheel
+        run: uv build --out-dir dist
+
+      - name: Check metadata
+        run: |
+          uv pip install --system twine
+          twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
