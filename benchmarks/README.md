@@ -71,3 +71,61 @@ before quoting anything:
 ```bash
 python benchmarks/bench.py --dimensions 1536 --sizes 10000 50000
 ```
+
+## Retrieval quality
+
+`retrieval_quality.py` asks whether hybrid search earns its place. It uses a
+small labelled set built so each failure mode is present: queries with a rare
+exact token (`ERR_4417`), paraphrases sharing no content words with the
+document that answers them, and queries with both.
+
+MRR over all 13 queries, 8 documents:
+
+| mode | HashEmbedder (weak) | MiniLM (strong) |
+| ---- | ------------------: | --------------: |
+| keyword only | 0.615 | 0.615 |
+| vector only  | 0.564 | **1.000** |
+| hybrid       | **0.673** | 0.885 |
+
+Read honestly, that says two things.
+
+**Hybrid is the right default, not the best answer to every case.** When the
+embedder is weak, hybrid beats either half (+0.058 MRR over the best single
+mode). When the embedder is strong and the corpus is small and topically
+distinct — every document about a different subject — dense retrieval already
+answers everything, and mixing in a weaker ranked list can only cost you
+(-0.115). A larger corpus with many documents per topic moves the balance back,
+because that is where exact terms start to matter for telling near-duplicates
+apart.
+
+The practical advice is to measure on your own corpus rather than trust either
+default. That is what `softrag.eval` is for:
+
+```python
+from softrag import compare
+
+results = compare(
+    rag,
+    my_labelled_queries,
+    variants={
+        "hybrid": {"mode": "hybrid"},
+        "vector": {"mode": "vector"},
+        "keyword": {"mode": "keyword"},
+    },
+)
+```
+
+**Building the keyword query is where most of the quality lives.** An OR over
+every token in *"when can we ship code to customers"* matches whatever contains
+*can*, *we* and *to*, and rank fusion then promotes that noise above correct
+dense hits — measurably worse than doing no keyword search at all. BM25 cannot
+save it, because BM25 only reweights documents that already matched. Dropping
+stopwords and terms above a document-frequency cutoff before the MATCH is built
+took the `mixed` group from 0.875 to 1.000 nDCG@3 and made fusion weights stop
+mattering at all — a good sign that the noise, not the weighting, was the
+problem.
+
+```bash
+python benchmarks/retrieval_quality.py                    # instant, no downloads
+python benchmarks/retrieval_quality.py --embedder local   # real embeddings
+```

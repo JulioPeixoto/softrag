@@ -39,6 +39,7 @@ from .errors import (
     StoreError,
 )
 from .filters import compile_where
+from .stopwords import is_stopword
 from .types import Hit, SourceInfo, Stats, Where
 
 log = logging.getLogger("softrag.store")
@@ -66,6 +67,20 @@ EXACT_FILTER_LIMIT = 1_000
 
 #: How many extra candidates to pull when post-filtering is unavoidable.
 POST_FILTER_OVERFETCH = 8
+
+#: A query term appearing in more than this fraction of the corpus carries no
+#: useful signal and is dropped before the FTS5 MATCH is built. Stopwords sit
+#: far above it; a genuinely central domain term sits below it, because a term
+#: in most documents cannot separate them from each other either way.
+MAX_DOCUMENT_FREQUENCY = 0.35
+
+#: Below this many chunks, document frequencies are too noisy to act on and
+#: every term is kept.
+MIN_CORPUS_FOR_IDF = 10
+
+#: Upper bound on memoised document frequencies, so a long-running process
+#: cannot accumulate one entry per distinct word ever queried.
+DF_CACHE_LIMIT = 4096
 
 _WORD = re.compile(r"[\w']+", re.UNICODE)
 
@@ -189,6 +204,8 @@ class Store:
         self._dimensions: int | None = dimensions
         self._vectors_ready = False
         self._closed = False
+        self._df_cache: dict[str, int] = {}
+        self._df_generation = -1
 
         self.db = self._connect(timeout)
         self._configure()
@@ -801,6 +818,95 @@ class Store:
                     out[int(doc_id)] = unpack_vector(row[0])
         return out
 
+    def build_match(self, query: str) -> str:
+        """Build the FTS5 MATCH expression for ``query``, keeping only terms
+        that actually discriminate between documents.
+
+        A plain OR over every token is what makes naive hybrid search worse than
+        vector search alone. Asking for ``"when" OR "can" OR "we" OR "ship" OR
+        "code" OR "to" OR "customers"`` returns whichever documents happen to
+        contain *can*, *we* and *to* -- noise, ranked confidently -- and rank
+        fusion then promotes that noise over correct dense hits. BM25 down-
+        weights common terms, but only among documents that already matched;
+        it cannot undo a candidate set built from stopwords.
+
+        Dropping terms that appear in more than :data:`MAX_DOCUMENT_FREQUENCY`
+        of the corpus fixes this at the source. When nothing informative
+        survives, the answer is an empty expression: this query has no keyword
+        signal, and saying so lets dense retrieval answer it alone.
+
+        Args:
+            query: Raw user text.
+
+        Returns:
+            A MATCH expression, or ``""`` when no term discriminates.
+        """
+        tokens = _WORD.findall(query)
+        if not tokens:
+            return ""
+
+        # A fixed stopword list and a document-frequency cutoff catch the same
+        # problem at different scales. Frequencies are decisive on a large
+        # corpus but meaningless on a small one, where every term looks rare --
+        # and a small corpus is exactly where a handful of stopword matches can
+        # dominate the ranking.
+        candidates = [t for t in tokens if not is_stopword(t)]
+        if not candidates:
+            return ""
+
+        candidates = _unique(candidates)
+        total = self.count()
+        if total < MIN_CORPUS_FOR_IDF:
+            informative = candidates
+        else:
+            cutoff = max(1, int(total * MAX_DOCUMENT_FREQUENCY))
+            informative = [
+                token
+                for token in candidates
+                if 0 < self._document_frequency(token, total) <= cutoff
+            ]
+            # Every term being too common is different from having no terms at
+            # all: the user did search for something real, it just fails to
+            # separate the corpus. Answer with it rather than with nothing --
+            # dropping only stopwords, which never come back.
+            if not informative:
+                informative = candidates
+
+        if not informative:
+            return ""
+        quoted = ['"' + token.replace('"', '""') + '"' for token in informative]
+        return " OR ".join(quoted)
+
+    def _document_frequency(self, token: str, total: int) -> int:
+        """How many chunks contain ``token``, memoised for the current corpus.
+
+        The cache is keyed on the corpus size, which is a cheap and sufficient
+        invalidation signal: document frequencies only matter as a ratio, and a
+        corpus whose size has not changed has not changed enough to alter one.
+        """
+        if self._df_generation != total:
+            self._df_cache.clear()
+            self._df_generation = total
+
+        key = token.lower()
+        cached = self._df_cache.get(key)
+        if cached is not None:
+            return cached
+
+        escaped = '"' + token.replace('"', '""') + '"'
+        try:
+            row = self.db.execute(
+                "SELECT COUNT(*) FROM documents_fts WHERE documents_fts MATCH ?",
+                (escaped,),
+            ).fetchone()
+            frequency = int(row[0]) if row else 0
+        except sqlite3.OperationalError:
+            frequency = 0
+
+        if len(self._df_cache) < DF_CACHE_LIMIT:
+            self._df_cache[key] = frequency
+        return frequency
+
     def search_keyword(
         self,
         query: str,
@@ -823,7 +929,7 @@ class Store:
         """
         if k <= 0:
             return []
-        match = escape_fts_query(query)
+        match = self.build_match(query)
         if not match:
             return []
 
@@ -1006,6 +1112,18 @@ def _hash_text(text: str) -> str:
     import hashlib
 
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _unique(tokens: Sequence[str]) -> list[str]:
+    """De-duplicate tokens case-insensitively, keeping the original order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for token in tokens:
+        key = token.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(token)
+    return out
 
 
 def _batched(items: Sequence[Any], size: int) -> Iterable[list[Any]]:
