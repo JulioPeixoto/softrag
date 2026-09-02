@@ -439,12 +439,10 @@ def _takes_a_batch(embedder: Any) -> bool:
     import inspect
     import typing
 
-    if inspect.isfunction(embedder) or inspect.ismethod(embedder):
-        target = embedder
-    else:
-        target = type(embedder).__call__
     try:
-        signature = inspect.signature(target)
+        # For a callable instance this already resolves to __call__ and drops
+        # self, so both shapes can be handled the same way.
+        signature = inspect.signature(embedder)
     except (TypeError, ValueError):
         return False
 
@@ -454,8 +452,6 @@ def _takes_a_batch(embedder: Any) -> bool:
         if p.kind
         in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     ]
-    if parameters and parameters[0].name == "self":
-        parameters = parameters[1:]
     if not parameters:
         return False
 

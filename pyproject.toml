@@ -123,6 +123,14 @@ warn_redundant_casts = true
 no_implicit_optional = true
 check_untyped_defs = true
 
+[[tool.mypy.overrides]]
+# numpy arrives transitively with the `local` extra, and its stubs use `type`
+# statement syntax that mypy rejects while checking against Python 3.10.
+# softrag never imports numpy itself, so there is nothing to gain by reading it.
+module = ["numpy", "numpy.*", "torch", "torch.*", "sentence_transformers.*"]
+follow_imports = "skip"
+ignore_errors = true
+
 [tool.coverage.run]
 source = ["src/softrag"]
 branch = true

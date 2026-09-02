@@ -24,7 +24,7 @@ pytest                                   # the suite: fast, offline, no API keys
 pytest --cov=softrag --cov-report=term-missing
 ruff check src tests benchmarks          # lint
 ruff format src tests benchmarks         # format
-mypy src/softrag                         # types (not yet strict-clean)
+mypy src/softrag                         # types (clean; CI enforces it)
 ```
 
 The whole suite runs in seconds and needs no network, no API key and no model
