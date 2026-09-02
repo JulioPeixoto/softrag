@@ -19,6 +19,7 @@ no longer exist and later queries fail outright, so they are not optional.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import math
@@ -27,9 +28,10 @@ import re
 import sqlite3
 import struct
 import threading
-from datetime import datetime, timezone
+from collections.abc import Iterable, Sequence
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any
 
 from .errors import (
     DimensionMismatchError,
@@ -94,7 +96,7 @@ def pack_vector(vec: Sequence[float]) -> bytes:
         ) from exc
 
 
-def unpack_vector(blob: bytes) -> List[float]:
+def unpack_vector(blob: bytes) -> list[float]:
     """Inverse of :func:`pack_vector`."""
     return list(struct.unpack(f"<{len(blob) // 4}f", blob))
 
@@ -131,8 +133,30 @@ def escape_fts_query(text: str, *, prefix: bool = False) -> str:
     return " OR ".join(quoted)
 
 
+_clock_lock = threading.Lock()
+_last_timestamp = ""
+
+
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    """Current UTC time, guaranteed to increase between calls.
+
+    Sources are ordered by ``updated_at``, so ties make "most recently updated
+    first" arbitrary. Formatting to microseconds is not enough on its own:
+    Windows' system clock advances in steps of roughly 15 ms, so a whole batch
+    of writes reads back the identical timestamp. Nudging the value forward
+    whenever the clock has not moved keeps the ordering strict.
+    """
+    global _last_timestamp
+    now = datetime.now(timezone.utc)
+    with _clock_lock:
+        stamp = now.isoformat(timespec="microseconds")
+        if stamp <= _last_timestamp:
+            previous = datetime.fromisoformat(_last_timestamp)
+            stamp = (previous + timedelta(microseconds=1)).isoformat(
+                timespec="microseconds"
+            )
+        _last_timestamp = stamp
+    return stamp
 
 
 # --------------------------------------------------------------------------- #
@@ -155,14 +179,14 @@ class Store:
         self,
         path: str | os.PathLike = "softrag.db",
         *,
-        dimensions: Optional[int] = None,
+        dimensions: int | None = None,
         read_only: bool = False,
         timeout: float = 30.0,
     ) -> None:
         self.path = Path(path) if str(path) != ":memory:" else Path(":memory:")
         self.read_only = read_only
         self._lock = threading.RLock()
-        self._dimensions: Optional[int] = dimensions
+        self._dimensions: int | None = dimensions
         self._vectors_ready = False
         self._closed = False
 
@@ -177,7 +201,9 @@ class Store:
         is_memory = str(self.path) == ":memory:"
         if not is_memory:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._is_new = is_memory or not self.path.exists() or self.path.stat().st_size == 0
+        self._is_new = (
+            is_memory or not self.path.exists() or self.path.stat().st_size == 0
+        )
         try:
             return sqlite3.connect(
                 str(self.path),
@@ -219,10 +245,8 @@ class Store:
                 f"(sqlite {sqlite3.sqlite_version}). Original error: {exc}"
             ) from exc
         finally:
-            try:
+            with contextlib.suppress(AttributeError, sqlite3.Error):
                 self.db.enable_load_extension(False)
-            except (AttributeError, sqlite3.Error):
-                pass
 
         functions = {
             row[0] for row in self.db.execute("SELECT name FROM pragma_function_list")
@@ -244,7 +268,7 @@ class Store:
             finally:
                 self._closed = True
 
-    def __enter__(self) -> "Store":
+    def __enter__(self) -> Store:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -358,14 +382,14 @@ class Store:
             [("created_at", now), ("distance_metric", "cosine")],
         )
 
-    def _read_dimensions(self) -> Optional[int]:
+    def _read_dimensions(self) -> int | None:
         row = self.db.execute(
             "SELECT value FROM softrag_meta WHERE key='dimensions'"
         ).fetchone()
         return int(row[0]) if row else None
 
     @property
-    def dimensions(self) -> Optional[int]:
+    def dimensions(self) -> int | None:
         """Vector width of this index, or ``None`` before the first write."""
         return self._dimensions
 
@@ -403,7 +427,7 @@ class Store:
             self._dimensions = dimensions
             self._vectors_ready = True
 
-    def check_embedder(self, fingerprint: str) -> Optional[str]:
+    def check_embedder(self, fingerprint: str) -> str | None:
         """Record which embedding model built this index, or flag a change.
 
         Vector width already catches the obvious mistake of swapping a 384-
@@ -461,8 +485,8 @@ class Store:
         *,
         content_hash: str,
         characters: int,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Optional[str]:
+        metadata: dict[str, Any] | None = None,
+    ) -> str | None:
         """Record a source, returning the previous content hash if it existed."""
         with self._lock:
             row = self.db.execute(
@@ -491,9 +515,9 @@ class Store:
         chunks: Sequence[str],
         embeddings: Sequence[Sequence[float]],
         *,
-        metadata: Optional[Sequence[Dict[str, Any]]] = None,
+        metadata: Sequence[dict[str, Any]] | None = None,
         start_index: int = 0,
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """Insert chunks with their embeddings.
 
         Chunks whose ``(source, hash)`` pair is already present are skipped, so
@@ -529,7 +553,7 @@ class Store:
         now = _utcnow()
         added = skipped = 0
         with self._lock, self._transaction():
-            for offset, (text, vector) in enumerate(zip(chunks, embeddings)):
+            for offset, (text, vector) in enumerate(zip(chunks, embeddings, strict=True)):
                 meta = dict(metadata[offset]) if metadata else {}
                 digest = _hash_text(text)
                 cursor = self.db.execute(
@@ -616,9 +640,7 @@ class Store:
                 self.db.execute("DELETE FROM vectors WHERE doc_id = ?", (doc_id,))
         for batch in _batched(ids, 500):
             placeholders = ",".join("?" for _ in batch)
-            self.db.execute(
-                f"DELETE FROM documents WHERE id IN ({placeholders})", batch
-            )
+            self.db.execute(f"DELETE FROM documents WHERE id IN ({placeholders})", batch)
 
     def reset(self) -> None:
         """Drop all indexed content, keeping the schema and vector width."""
@@ -648,9 +670,9 @@ class Store:
         query_vector: Sequence[float],
         *,
         k: int,
-        where: Optional[Where] = None,
-        source: Optional[str] = None,
-    ) -> List[Tuple[int, float]]:
+        where: Where | None = None,
+        source: str | None = None,
+    ) -> list[tuple[int, float]]:
         """Nearest neighbours by cosine distance.
 
         Without a filter this uses ``vec0``'s native KNN. With a filter the
@@ -685,8 +707,8 @@ class Store:
             return self._approximate_filtered(blob, where, source, k)
 
     def _native_knn(
-        self, blob: bytes, k: int, *, source: Optional[str] = None
-    ) -> List[Tuple[int, float]]:
+        self, blob: bytes, k: int, *, source: str | None = None
+    ) -> list[tuple[int, float]]:
         """vec0's own KNN operator: the fast path when nothing needs filtering."""
         capped = min(k, VEC0_MAX_K)
         if capped < k:
@@ -699,7 +721,7 @@ class Store:
             )
         if source is None:
             sql = "SELECT doc_id, distance FROM vectors WHERE embedding MATCH ? AND k = ?"
-            params: Tuple[Any, ...] = (blob, capped)
+            params: tuple[Any, ...] = (blob, capped)
         else:
             sql = (
                 "SELECT doc_id, distance FROM vectors "
@@ -711,7 +733,7 @@ class Store:
 
     def _exact_vector_scan(
         self, blob: bytes, ids: Sequence[int], k: int
-    ) -> List[Tuple[int, float]]:
+    ) -> list[tuple[int, float]]:
         """Score a known set of rows exactly and keep the best ``k``.
 
         One point lookup per row. That looks wasteful next to a single
@@ -719,7 +741,7 @@ class Store:
         while an equality on the primary key is a real lookup, which makes the
         loop several times faster for the selective filters that reach here.
         """
-        scored: List[Tuple[int, float]] = []
+        scored: list[tuple[int, float]] = []
         for doc_id in ids:
             row = self.db.execute(
                 "SELECT doc_id, vec_distance_cosine(embedding, ?) AS distance "
@@ -733,8 +755,8 @@ class Store:
         return scored[:k]
 
     def _approximate_filtered(
-        self, blob: bytes, where: Optional[Where], source: Optional[str], k: int
-    ) -> List[Tuple[int, float]]:
+        self, blob: bytes, where: Where | None, source: str | None, k: int
+    ) -> list[tuple[int, float]]:
         """Fall back to over-fetched KNN, then drop non-matching rows.
 
         Only reached when the filter matches too many rows to rescore exactly,
@@ -761,7 +783,7 @@ class Store:
         ).fetchall()
         return [(int(i), float(d)) for i, d in rows if d is not None]
 
-    def vectors_for(self, ids: Sequence[int]) -> Dict[int, List[float]]:
+    def vectors_for(self, ids: Sequence[int]) -> dict[int, list[float]]:
         """Load stored embeddings by document id.
 
         Point lookups again, for the same reason as :meth:`_exact_vector_scan`:
@@ -769,7 +791,7 @@ class Store:
         """
         if not ids or not self._vectors_ready:
             return {}
-        out: Dict[int, List[float]] = {}
+        out: dict[int, list[float]] = {}
         with self._lock:
             for doc_id in ids:
                 row = self.db.execute(
@@ -784,9 +806,9 @@ class Store:
         query: str,
         *,
         k: int,
-        where: Optional[Where] = None,
-        source: Optional[str] = None,
-    ) -> List[Tuple[int, float]]:
+        where: Where | None = None,
+        source: str | None = None,
+    ) -> list[tuple[int, float]]:
         """Best BM25 matches for ``query``.
 
         Args:
@@ -829,8 +851,8 @@ class Store:
         return [(int(i), float(s)) for i, s in rows]
 
     def _filter_ids(
-        self, where: Optional[Where], source: Optional[str], *, limit: int
-    ) -> List[int]:
+        self, where: Where | None, source: str | None, *, limit: int
+    ) -> list[int]:
         predicate, params = compile_where(where, column="d.metadata")
         source_clause = " AND d.source = ?" if source else ""
         source_params = [source] if source else []
@@ -840,11 +862,11 @@ class Store:
         ).fetchall()
         return [int(r[0]) for r in rows]
 
-    def fetch(self, ids: Sequence[int]) -> Dict[int, Hit]:
+    def fetch(self, ids: Sequence[int]) -> dict[int, Hit]:
         """Load documents by id, keyed by id (order is the caller's business)."""
         if not ids:
             return {}
-        out: Dict[int, Hit] = {}
+        out: dict[int, Hit] = {}
         with self._lock:
             for batch in _batched(list(ids), 500):
                 placeholders = ",".join("?" for _ in batch)
@@ -864,7 +886,7 @@ class Store:
                     )
         return out
 
-    def neighbors(self, source: str, index: int, *, radius: int = 1) -> List[Hit]:
+    def neighbors(self, source: str, index: int, *, radius: int = 1) -> list[Hit]:
         """Chunks adjacent to ``index`` within the same source.
 
         Used to widen a hit into its surrounding context without inflating the
@@ -891,13 +913,13 @@ class Store:
             for doc_id, text, src, idx, meta in rows
         ]
 
-    def sources(self, *, limit: Optional[int] = None) -> List[SourceInfo]:
+    def sources(self, *, limit: int | None = None) -> list[SourceInfo]:
         """Every source currently indexed, most recently updated first."""
         sql = (
             "SELECT source, chunks, characters, added_at, metadata FROM sources "
-            "ORDER BY updated_at DESC"
+            "ORDER BY updated_at DESC, rowid DESC"
         )
-        params: List[Any] = []
+        params: list[Any] = []
         if limit is not None:
             sql += " LIMIT ?"
             params.append(limit)
@@ -914,7 +936,7 @@ class Store:
             for source, chunks, characters, added_at, metadata in rows
         ]
 
-    def has_source(self, source: str, *, content_hash: Optional[str] = None) -> bool:
+    def has_source(self, source: str, *, content_hash: str | None = None) -> bool:
         """Whether ``source`` is indexed, optionally with that exact content."""
         with self._lock:
             row = self.db.execute(
@@ -933,9 +955,7 @@ class Store:
         """A summary of the index."""
         with self._lock:
             documents = self.count()
-            sources = int(
-                self.db.execute("SELECT COUNT(*) FROM sources").fetchone()[0]
-            )
+            sources = int(self.db.execute("SELECT COUNT(*) FROM sources").fetchone()[0])
         size = 0
         if str(self.path) != ":memory:" and self.path.exists():
             size = self.path.stat().st_size
@@ -959,7 +979,7 @@ class Store:
             self.db = db
             self.owns = False
 
-        def __enter__(self) -> "Store._Transaction":
+        def __enter__(self) -> Store._Transaction:
             if not self.db.in_transaction:
                 self.db.execute("BEGIN IMMEDIATE")
                 self.owns = True
@@ -973,7 +993,7 @@ class Store:
             else:
                 self.db.execute("ROLLBACK")
 
-    def _transaction(self) -> "Store._Transaction":
+    def _transaction(self) -> Store._Transaction:
         return Store._Transaction(self.db)
 
 
@@ -988,6 +1008,6 @@ def _hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _batched(items: Sequence[Any], size: int) -> Iterable[List[Any]]:
+def _batched(items: Sequence[Any], size: int) -> Iterable[list[Any]]:
     for start in range(0, len(items), size):
         yield list(items[start : start + size])

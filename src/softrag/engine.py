@@ -11,18 +11,11 @@ import concurrent.futures
 import hashlib
 import logging
 import os
-from dataclasses import dataclass, field, replace
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import (
     Any,
-    Callable,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Union,
 )
 
 from .chunking import (
@@ -50,7 +43,7 @@ from .types import (
 
 log = logging.getLogger("softrag")
 
-__all__ = ["Rag", "RagConfig", "connect", "DEFAULT_PROMPT"]
+__all__ = ["DEFAULT_PROMPT", "Rag", "RagConfig", "connect"]
 
 DEFAULT_PROMPT = """\
 Answer the question using only the context below. Each context block is \
@@ -66,7 +59,7 @@ Question: {question}
 Answer:"""
 
 #: Input shapes accepted by :meth:`Rag.add`.
-Source = Union[str, Path, bytes, bytearray]
+Source = str | Path | bytes | bytearray
 
 ProgressCallback = Callable[[str, int, int], None]
 
@@ -96,7 +89,7 @@ class RagConfig:
     mode: SearchMode = "hybrid"
     vector_weight: float = 1.0
     keyword_weight: float = 1.0
-    candidates: Optional[int] = None
+    candidates: int | None = None
     diversity: float = 0.0
     expand_context: int = 0
     prompt: str = DEFAULT_PROMPT
@@ -153,8 +146,8 @@ class Rag:
         chat_model: Any = None,
         db_path: str | os.PathLike = "softrag.db",
         chunker: Chunker | str | None = None,
-        config: Optional[RagConfig] = None,
-        reranker: Optional[Reranker] = None,
+        config: RagConfig | None = None,
+        reranker: Reranker | None = None,
         auto: bool = True,
         **overrides: Any,
     ) -> None:
@@ -178,7 +171,7 @@ class Rag:
             embed_model = auto_embedder()
 
         self.embedder: Embedder = adapt_embedder(embed_model)
-        self._chat: Optional[ChatModel] = None
+        self._chat: ChatModel | None = None
         self._chat_source = chat_model
         self._auto_chat = auto and chat_model is None
         if chat_model is not None:
@@ -217,7 +210,7 @@ class Rag:
         """Close the underlying database. Safe to call more than once."""
         self.store.close()
 
-    def __enter__(self) -> "Rag":
+    def __enter__(self) -> Rag:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -239,8 +232,8 @@ class Rag:
         self,
         source: Source,
         *,
-        metadata: Optional[Dict[str, Any]] = None,
-        name: Optional[str] = None,
+        metadata: dict[str, Any] | None = None,
+        name: str | None = None,
         chunker: Chunker | str | None = None,
         on_change: str = "replace",
     ) -> IngestResult:
@@ -266,13 +259,15 @@ class Rag:
             IngestionError: If the input cannot be turned into text.
         """
         if isinstance(source, (bytes, bytearray)):
-            return self.add_file(source, metadata=metadata, name=name, chunker=chunker,
-                                 on_change=on_change)
+            return self.add_file(
+                source, metadata=metadata, name=name, chunker=chunker, on_change=on_change
+            )
 
         text = str(source)
         if _looks_like_url(text):
-            return self.add_web(text, metadata=metadata, name=name, chunker=chunker,
-                                on_change=on_change)
+            return self.add_web(
+                text, metadata=metadata, name=name, chunker=chunker, on_change=on_change
+            )
 
         path = Path(text)
         if path.is_dir():
@@ -287,18 +282,20 @@ class Rag:
                 f"rag.add_directory(base_dir, pattern={text!r}) instead."
             )
         if path.exists():
-            return self.add_file(path, metadata=metadata, name=name, chunker=chunker,
-                                 on_change=on_change)
+            return self.add_file(
+                path, metadata=metadata, name=name, chunker=chunker, on_change=on_change
+            )
 
-        return self.add_text(text, metadata=metadata, name=name, chunker=chunker,
-                             on_change=on_change)
+        return self.add_text(
+            text, metadata=metadata, name=name, chunker=chunker, on_change=on_change
+        )
 
     def add_text(
         self,
         text: str,
         *,
-        metadata: Optional[Dict[str, Any]] = None,
-        name: Optional[str] = None,
+        metadata: dict[str, Any] | None = None,
+        name: str | None = None,
         chunker: Chunker | str | None = None,
         on_change: str = "replace",
     ) -> IngestResult:
@@ -321,8 +318,8 @@ class Rag:
         self,
         path: Source,
         *,
-        metadata: Optional[Dict[str, Any]] = None,
-        name: Optional[str] = None,
+        metadata: dict[str, Any] | None = None,
+        name: str | None = None,
         chunker: Chunker | str | None = None,
         on_change: str = "replace",
     ) -> IngestResult:
@@ -352,8 +349,8 @@ class Rag:
         self,
         url: str,
         *,
-        metadata: Optional[Dict[str, Any]] = None,
-        name: Optional[str] = None,
+        metadata: dict[str, Any] | None = None,
+        name: str | None = None,
         chunker: Chunker | str | None = None,
         on_change: str = "replace",
         timeout: float = 30.0,
@@ -383,9 +380,9 @@ class Rag:
         self,
         path: Source,
         *,
-        metadata: Optional[Dict[str, Any]] = None,
-        name: Optional[str] = None,
-        prompt: Optional[str] = None,
+        metadata: dict[str, Any] | None = None,
+        name: str | None = None,
+        prompt: str | None = None,
         on_change: str = "replace",
     ) -> IngestResult:
         """Describe an image with the chat model and index the description.
@@ -426,11 +423,11 @@ class Rag:
         *,
         pattern: str = "**/*",
         exclude: Sequence[str] = (),
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
         recursive: bool = True,
-        on_progress: Optional[ProgressCallback] = None,
+        on_progress: ProgressCallback | None = None,
         ignore_errors: bool = True,
-    ) -> List[IngestResult]:
+    ) -> list[IngestResult]:
         """Index every supported file under a directory.
 
         Args:
@@ -466,11 +463,11 @@ class Rag:
         self,
         sources: Iterable[Source],
         *,
-        metadata: Optional[Dict[str, Any]] = None,
-        max_workers: Optional[int] = None,
-        on_progress: Optional[ProgressCallback] = None,
+        metadata: dict[str, Any] | None = None,
+        max_workers: int | None = None,
+        on_progress: ProgressCallback | None = None,
         ignore_errors: bool = True,
-    ) -> List[IngestResult]:
+    ) -> list[IngestResult]:
         """Index many sources, extracting and embedding them concurrently.
 
         Extraction and embedding run in a thread pool because both are dominated
@@ -491,7 +488,7 @@ class Rag:
         if not items:
             return []
         workers = max(1, max_workers or self.config.max_workers)
-        results: List[IngestResult] = [IngestResult(source="")] * len(items)
+        results: list[IngestResult] = [IngestResult(source="")] * len(items)
         done = 0
 
         def work(index: int, item: Source) -> None:
@@ -504,9 +501,7 @@ class Rag:
                 results[index] = IngestResult(source=str(item), error=str(exc))
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {
-                pool.submit(work, i, item): item for i, item in enumerate(items)
-            }
+            futures = {pool.submit(work, i, item): item for i, item in enumerate(items)}
             for future in concurrent.futures.as_completed(futures):
                 future.result()
                 done += 1
@@ -519,7 +514,7 @@ class Rag:
         self,
         source: str,
         text: str,
-        metadata: Optional[Dict[str, Any]],
+        metadata: dict[str, Any] | None,
         chunker: Chunker | str | None,
         on_change: str,
     ) -> IngestResult:
@@ -599,15 +594,15 @@ class Rag:
         self,
         query: str,
         *,
-        top_k: Optional[int] = None,
-        mode: Optional[SearchMode] = None,
-        where: Optional[Where] = None,
-        source: Optional[str] = None,
-        candidates: Optional[int] = None,
-        diversity: Optional[float] = None,
-        expand_context: Optional[int] = None,
-        rerank: Union[bool, Reranker, None] = None,
-    ) -> List[Hit]:
+        top_k: int | None = None,
+        mode: SearchMode | None = None,
+        where: Where | None = None,
+        source: str | None = None,
+        candidates: int | None = None,
+        diversity: float | None = None,
+        expand_context: int | None = None,
+        rerank: bool | Reranker | None = None,
+    ) -> list[Hit]:
         """Retrieve relevant chunks without calling a chat model.
 
         This is the honest way to evaluate an index: whatever comes back is
@@ -660,15 +655,15 @@ class Rag:
         self,
         question: str,
         *,
-        top_k: Optional[int] = None,
-        mode: Optional[SearchMode] = None,
-        where: Optional[Where] = None,
-        source: Optional[str] = None,
+        top_k: int | None = None,
+        mode: SearchMode | None = None,
+        where: Where | None = None,
+        source: str | None = None,
         stream: bool = False,
-        prompt: Optional[str] = None,
-        rerank: Union[bool, Reranker, None] = None,
+        prompt: str | None = None,
+        rerank: bool | Reranker | None = None,
         **search_kwargs: Any,
-    ) -> Union[Answer, StreamingAnswer]:
+    ) -> Answer | StreamingAnswer:
         """Answer a question using retrieved context.
 
         Args:
@@ -721,9 +716,7 @@ class Rag:
             source_stream, hits=hits, question=question, prompt=rendered
         )
 
-    def _resolve_reranker(
-        self, rerank: Union[bool, Reranker, None]
-    ) -> Optional[Reranker]:
+    def _resolve_reranker(self, rerank: bool | Reranker | None) -> Reranker | None:
         if rerank is False:
             return None
         if rerank is None or rerank is True:
@@ -732,13 +725,11 @@ class Rag:
 
     # -- management --------------------------------------------------------- #
 
-    def sources(self, *, limit: Optional[int] = None) -> List[SourceInfo]:
+    def sources(self, *, limit: int | None = None) -> list[SourceInfo]:
         """List indexed sources, most recently updated first."""
         return self.store.sources(limit=limit)
 
-    def delete(
-        self, source: Optional[str] = None, *, where: Optional[Where] = None
-    ) -> int:
+    def delete(self, source: str | None = None, *, where: Where | None = None) -> int:
         """Remove content from the index.
 
         Args:
@@ -808,9 +799,7 @@ def connect(
         chat_model: Override the auto-detected chat model.
         **kwargs: Forwarded to :class:`Rag`.
     """
-    return Rag(
-        db_path=db_path, embed_model=embed_model, chat_model=chat_model, **kwargs
-    )
+    return Rag(db_path=db_path, embed_model=embed_model, chat_model=chat_model, **kwargs)
 
 
 # --------------------------------------------------------------------------- #
@@ -827,7 +816,7 @@ def _looks_like_url(text: str) -> bool:
     return lowered.startswith(("http://", "https://"))
 
 
-def _batches(items: Sequence[str], size: int) -> Iterator[List[str]]:
+def _batches(items: Sequence[str], size: int) -> Iterator[list[str]]:
     size = max(1, size)
     for start in range(0, len(items), size):
         yield list(items[start : start + size])

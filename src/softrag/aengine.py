@@ -17,15 +17,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator, Iterable, Sequence
 from typing import (
     Any,
-    AsyncIterator,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Union,
 )
 
 from .chunking import Chunker
@@ -54,7 +48,7 @@ class AsyncStreamingAnswer:
     generation starts.
     """
 
-    __slots__ = ("_stream", "hits", "question", "prompt", "_parts", "_done")
+    __slots__ = ("_done", "_parts", "_stream", "hits", "prompt", "question")
 
     def __init__(
         self,
@@ -65,13 +59,13 @@ class AsyncStreamingAnswer:
         prompt: str = "",
     ) -> None:
         self._stream = stream
-        self.hits: List[Hit] = list(hits)
+        self.hits: list[Hit] = list(hits)
         self.question = question
         self.prompt = prompt
-        self._parts: List[str] = []
+        self._parts: list[str] = []
         self._done = False
 
-    def __aiter__(self) -> "AsyncStreamingAnswer":
+    def __aiter__(self) -> AsyncStreamingAnswer:
         return self
 
     async def __anext__(self) -> str:
@@ -91,8 +85,8 @@ class AsyncStreamingAnswer:
         return "".join(self._parts)
 
     @property
-    def sources(self) -> List[str]:
-        seen: Dict[str, None] = {}
+    def sources(self) -> list[str]:
+        seen: dict[str, None] = {}
         for hit in self.hits:
             if hit.source:
                 seen.setdefault(hit.source, None)
@@ -138,8 +132,8 @@ class AsyncRag:
         chat_model: Any = None,
         db_path: str | os.PathLike = "softrag.db",
         chunker: Chunker | str | None = None,
-        config: Optional[RagConfig] = None,
-        reranker: Optional[Reranker] = None,
+        config: RagConfig | None = None,
+        reranker: Reranker | None = None,
         auto: bool = True,
         max_concurrency: int = 8,
         **overrides: Any,
@@ -175,7 +169,7 @@ class AsyncRag:
         """Close the underlying database."""
         await asyncio.to_thread(self._rag.close)
 
-    async def __aenter__(self) -> "AsyncRag":
+    async def __aenter__(self) -> AsyncRag:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -215,10 +209,10 @@ class AsyncRag:
         self,
         sources: Iterable[Any],
         *,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
         ignore_errors: bool = True,
         **kwargs: Any,
-    ) -> List[IngestResult]:
+    ) -> list[IngestResult]:
         """Index many sources concurrently.
 
         Concurrency is bounded by ``max_concurrency`` so a large ingest does not
@@ -247,14 +241,15 @@ class AsyncRag:
 
     async def add_directory(
         self, directory: str | os.PathLike, **kwargs: Any
-    ) -> List[IngestResult]:
+    ) -> list[IngestResult]:
         """Index every supported file under a directory.
 
         Discovery is cheap and synchronous; the ingestion itself fans out
         through :meth:`add_many`.
         """
-        from .ingest import discover_files
         from pathlib import Path
+
+        from .ingest import discover_files
 
         base = Path(directory)
         files = await asyncio.to_thread(
@@ -272,12 +267,12 @@ class AsyncRag:
         self,
         query: str,
         *,
-        top_k: Optional[int] = None,
-        mode: Optional[SearchMode] = None,
-        where: Optional[Where] = None,
-        source: Optional[str] = None,
+        top_k: int | None = None,
+        mode: SearchMode | None = None,
+        where: Where | None = None,
+        source: str | None = None,
         **kwargs: Any,
-    ) -> List[Hit]:
+    ) -> list[Hit]:
         """Retrieve relevant chunks. See :meth:`softrag.Rag.search`."""
         return await self._run(
             self._rag.search,
@@ -294,9 +289,9 @@ class AsyncRag:
         question: str,
         *,
         stream: bool = False,
-        prompt: Optional[str] = None,
+        prompt: str | None = None,
         **kwargs: Any,
-    ) -> Union[Answer, AsyncStreamingAnswer]:
+    ) -> Answer | AsyncStreamingAnswer:
         """Answer a question using retrieved context.
 
         Args:
@@ -376,12 +371,12 @@ class AsyncRag:
 
     # -- management --------------------------------------------------------- #
 
-    async def sources(self, *, limit: Optional[int] = None) -> List[SourceInfo]:
+    async def sources(self, *, limit: int | None = None) -> list[SourceInfo]:
         """List indexed sources."""
         return await self._run(self._rag.sources, limit=limit)
 
     async def delete(
-        self, source: Optional[str] = None, *, where: Optional[Where] = None
+        self, source: str | None = None, *, where: Where | None = None
     ) -> int:
         """Remove content from the index. See :meth:`softrag.Rag.delete`."""
         return await self._run(self._rag.delete, source, where=where)

@@ -45,6 +45,7 @@ openai = ["openai>=1.40"]
 anthropic = ["anthropic>=0.40"]
 local = ["sentence-transformers>=3.0"]
 rerank = ["sentence-transformers>=3.0"]
+cohere = ["cohere>=5.0"]
 files = ["pypdf>=5.0"]
 web = ["httpx>=0.27", "trafilatura>=2.0"]
 cli = ["rich>=13.0"]
@@ -106,6 +107,7 @@ ignore = [
     "E501",   # line length is handled by the formatter
     "B008",   # function calls in argument defaults are fine for our dataclasses
     "SIM108", # ternaries are not always clearer
+    "RUF022", # __all__ is grouped by role, which reads better than alphabetical
 ]
 
 [tool.ruff.lint.per-file-ignores]

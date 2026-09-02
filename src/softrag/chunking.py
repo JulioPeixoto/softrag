@@ -11,20 +11,20 @@ is a drop-in replacement anywhere a chunker is accepted.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Callable, List, Sequence
 
 __all__ = [
     "Chunker",
-    "RecursiveChunker",
     "MarkdownChunker",
+    "RecursiveChunker",
     "SentenceChunker",
     "by_separator",
     "resolve_chunker",
 ]
 
 #: Anything that cuts a document into pieces.
-Chunker = Callable[[str], List[str]]
+Chunker = Callable[[str], list[str]]
 
 DEFAULT_CHUNK_SIZE = 1_000
 DEFAULT_CHUNK_OVERLAP = 200
@@ -93,10 +93,10 @@ class RecursiveChunker:
                 f"chunk_size ({self.chunk_size}); otherwise chunks never advance."
             )
 
-    def __call__(self, text: str) -> List[str]:
+    def __call__(self, text: str) -> list[str]:
         return self.split(text)
 
-    def split(self, text: str) -> List[str]:
+    def split(self, text: str) -> list[str]:
         """Cut ``text`` into overlapping chunks."""
         if not text or not text.strip():
             return []
@@ -105,7 +105,7 @@ class RecursiveChunker:
 
     # -- internals ---------------------------------------------------------- #
 
-    def _split_recursive(self, text: str, separators: List[str]) -> List[str]:
+    def _split_recursive(self, text: str, separators: list[str]) -> list[str]:
         """Break ``text`` into pieces that each fit, or cannot be broken further."""
         if self.length(text) <= self.chunk_size:
             return [text] if text else []
@@ -122,7 +122,7 @@ class RecursiveChunker:
             # This separator does not occur; try the next one without recursing.
             return self._split_recursive(text, rest)
 
-        out: List[str] = []
+        out: list[str] = []
         for i, part in enumerate(parts):
             if self.keep_separator and i < len(parts) - 1:
                 part = part + separator
@@ -134,15 +134,15 @@ class RecursiveChunker:
                 out.extend(self._split_recursive(part, rest))
         return out
 
-    def _hard_split(self, text: str) -> List[str]:
+    def _hard_split(self, text: str) -> list[str]:
         """Last resort: slice an unbreakable run at fixed width."""
         size = self.chunk_size
         return [text[i : i + size] for i in range(0, len(text), size)] or []
 
-    def _merge(self, pieces: Sequence[str]) -> List[str]:
+    def _merge(self, pieces: Sequence[str]) -> list[str]:
         """Greedily pack small pieces back up to ``chunk_size``, with overlap."""
-        chunks: List[str] = []
-        current: List[str] = []
+        chunks: list[str] = []
+        current: list[str] = []
         current_len = 0
 
         for piece in pieces:
@@ -150,6 +150,12 @@ class RecursiveChunker:
             if current and current_len + piece_len > self.chunk_size:
                 chunks.append(self._emit(current))
                 current, current_len = self._carry_over(current)
+                # The carried-over overlap counts against the next chunk's
+                # budget too. Without this, a chunk could come back as large as
+                # overlap + chunk_size, breaking the one guarantee the argument
+                # makes.
+                while current and current_len + piece_len > self.chunk_size:
+                    current_len -= self.length(current.pop(0))
             current.append(piece)
             current_len += piece_len
 
@@ -158,11 +164,11 @@ class RecursiveChunker:
 
         return [c for c in chunks if c]
 
-    def _carry_over(self, current: List[str]) -> tuple[List[str], int]:
+    def _carry_over(self, current: list[str]) -> tuple[list[str], int]:
         """Take the tail of the finished chunk to seed the next one."""
         if self.chunk_overlap == 0:
             return [], 0
-        tail: List[str] = []
+        tail: list[str] = []
         tail_len = 0
         for piece in reversed(current):
             piece_len = self.length(piece)
@@ -196,48 +202,56 @@ class MarkdownChunker:
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP
     include_heading_trail: bool = True
 
-    def __call__(self, text: str) -> List[str]:
+    def __call__(self, text: str) -> list[str]:
         return self.split(text)
 
-    def split(self, text: str) -> List[str]:
+    @property
+    def _overlap(self) -> int:
+        """Overlap that always leaves room to advance.
+
+        A caller who lowers ``chunk_size`` without touching ``chunk_overlap``
+        would otherwise hand the inner chunker an impossible pair.
+        """
+        return min(self.chunk_overlap, max(self.chunk_size // 4, 0))
+
+    def split(self, text: str) -> list[str]:
         if not text or not text.strip():
             return []
 
-        inner = RecursiveChunker(
-            chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap
-        )
+        inner = RecursiveChunker(chunk_size=self.chunk_size, chunk_overlap=self._overlap)
         sections = self._sections(text)
         if not sections:
             return inner.split(text)
 
-        chunks: List[str] = []
+        chunks: list[str] = []
         for trail, body in sections:
             body = body.strip()
             if not body:
                 continue
-            prefix = f"{trail}\n\n" if (trail and self.include_heading_trail) else ""
+            prefix = f"{trail}\n\n" if trail else ""
             budget = self.chunk_size - len(prefix)
             if budget <= 0 or len(body) <= budget:
                 chunks.append(prefix + body)
                 continue
             sized = RecursiveChunker(
-                chunk_size=max(budget, 1), chunk_overlap=self.chunk_overlap
+                chunk_size=max(budget, 1),
+                chunk_overlap=min(self._overlap, max(budget // 4, 0)),
             )
             chunks.extend(prefix + part for part in sized.split(body))
         return chunks or inner.split(text)
 
-    def _sections(self, text: str) -> List[tuple[str, str]]:
+    def _sections(self, text: str) -> list[tuple[str, str]]:
         """Return ``(heading_trail, body)`` pairs in document order."""
         matches = list(_MD_HEADING.finditer(text))
         if not matches:
             return []
 
-        sections: List[tuple[str, str]] = []
+        sections: list[tuple[str, str]] = []
         preamble = text[: matches[0].start()].strip()
         if preamble:
             sections.append(("", preamble))
 
-        trail: List[str] = []
+        trail: list[str] = []
         for i, match in enumerate(matches):
             level = len(match.group(1))
             heading = match.group(0).strip()
@@ -246,8 +260,12 @@ class MarkdownChunker:
                 trail.append("")
             trail.append(heading)
             end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-            body = text[match.start() : end]
-            sections.append((" > ".join(h for h in trail if h), body))
+            # Slice from the end of the heading line: the prefix added in
+            # split() already carries the heading, and starting at match.start()
+            # would repeat it inside every chunk of the section.
+            body = text[match.end() : end]
+            breadcrumb = " > ".join(h for h in trail if h)
+            sections.append((breadcrumb if self.include_heading_trail else heading, body))
         return sections
 
 
@@ -266,23 +284,25 @@ class SentenceChunker:
     chunk_size: int = DEFAULT_CHUNK_SIZE
     overlap_sentences: int = 1
 
-    def __call__(self, text: str) -> List[str]:
+    def __call__(self, text: str) -> list[str]:
         return self.split(text)
 
-    def split(self, text: str) -> List[str]:
+    def split(self, text: str) -> list[str]:
         if not text or not text.strip():
             return []
         sentences = [s.strip() for s in _SENTENCE_END.split(text) if s.strip()]
         if not sentences:
             return []
 
-        chunks: List[str] = []
-        current: List[str] = []
+        chunks: list[str] = []
+        current: list[str] = []
         current_len = 0
         for sentence in sentences:
             if current and current_len + len(sentence) + 1 > self.chunk_size:
                 chunks.append(" ".join(current))
-                keep = current[-self.overlap_sentences :] if self.overlap_sentences else []
+                keep = (
+                    current[-self.overlap_sentences :] if self.overlap_sentences else []
+                )
                 current = list(keep)
                 current_len = sum(len(s) + 1 for s in current)
             current.append(sentence)
@@ -303,7 +323,7 @@ def by_separator(separator: str, *, strip: bool = True) -> Chunker:
         A callable suitable for the ``chunker`` argument.
     """
 
-    def _split(text: str) -> List[str]:
+    def _split(text: str) -> list[str]:
         parts = text.split(separator)
         if not strip:
             return parts

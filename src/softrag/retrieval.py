@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
 
 from .store import Store
 from .types import Hit, Where
@@ -24,11 +24,11 @@ from .types import Hit, Where
 log = logging.getLogger("softrag.retrieval")
 
 __all__ = [
-    "SearchMode",
     "RetrievalConfig",
     "Retriever",
-    "reciprocal_rank_fusion",
+    "SearchMode",
     "maximal_marginal_relevance",
+    "reciprocal_rank_fusion",
 ]
 
 SearchMode = str  # "hybrid" | "vector" | "keyword"
@@ -41,9 +41,9 @@ DEFAULT_RRF_K = 60
 def reciprocal_rank_fusion(
     ranked_lists: Sequence[Sequence[int]],
     *,
-    weights: Optional[Sequence[float]] = None,
+    weights: Sequence[float] | None = None,
     k: int = DEFAULT_RRF_K,
-) -> List[Tuple[int, float]]:
+) -> list[tuple[int, float]]:
     """Fuse several ranked id lists into one.
 
     Each list contributes ``weight / (k + rank)`` to every id it contains, with
@@ -69,8 +69,8 @@ def reciprocal_rank_fusion(
             f"Got {len(ranked_lists)} ranked lists but {len(weights)} weights."
         )
 
-    scores: Dict[int, float] = {}
-    for ranked, weight in zip(ranked_lists, weights):
+    scores: dict[int, float] = {}
+    for ranked, weight in zip(ranked_lists, weights, strict=True):
         if weight == 0:
             continue
         for rank, item in enumerate(ranked, start=1):
@@ -81,11 +81,11 @@ def reciprocal_rank_fusion(
 
 def maximal_marginal_relevance(
     query_vector: Sequence[float],
-    candidates: Sequence[Tuple[int, Sequence[float]]],
+    candidates: Sequence[tuple[int, Sequence[float]]],
     *,
     top_k: int,
     diversity: float = 0.3,
-) -> List[int]:
+) -> list[int]:
     """Pick ``top_k`` ids that are relevant *and* different from each other.
 
     Greedy MMR: repeatedly take the candidate maximising
@@ -110,15 +110,15 @@ def maximal_marginal_relevance(
     pool = [(doc_id, _normalize(vec)) for doc_id, vec in candidates]
     relevance = {doc_id: _dot(query_norm, vec) for doc_id, vec in pool}
 
-    selected: List[int] = []
+    selected: list[int] = []
     remaining = dict(pool)
     # Running maximum similarity to anything already selected. Keeping it
     # incrementally means each round compares candidates against only the one
     # newly selected vector, which turns the naive O(n * k^2) into O(n * k).
-    redundancy: Dict[int, float] = {doc_id: 0.0 for doc_id, _ in pool}
+    redundancy: dict[int, float] = {doc_id: 0.0 for doc_id, _ in pool}
 
     while remaining and len(selected) < top_k:
-        best_id: Optional[int] = None
+        best_id: int | None = None
         best_score = -math.inf
         for doc_id in remaining:
             score = (1 - diversity) * relevance[doc_id] - diversity * redundancy[doc_id]
@@ -136,7 +136,7 @@ def maximal_marginal_relevance(
     return selected
 
 
-def _normalize(vec: Sequence[float]) -> List[float]:
+def _normalize(vec: Sequence[float]) -> list[float]:
     norm = math.sqrt(sum(v * v for v in vec))
     if norm == 0:
         return list(vec)
@@ -144,7 +144,7 @@ def _normalize(vec: Sequence[float]) -> List[float]:
 
 
 def _dot(a: Sequence[float], b: Sequence[float]) -> float:
-    return sum(x * y for x, y in zip(a, b))
+    return sum(x * y for x, y in zip(a, b, strict=False))
 
 
 @dataclass(slots=True)
@@ -166,7 +166,7 @@ class RetrievalConfig:
 
     mode: SearchMode = "hybrid"
     top_k: int = 5
-    candidates: Optional[int] = None
+    candidates: int | None = None
     vector_weight: float = 1.0
     keyword_weight: float = 1.0
     rrf_k: int = DEFAULT_RRF_K
@@ -188,12 +188,12 @@ class Retriever:
     def search(
         self,
         query: str,
-        query_vector: Optional[Sequence[float]],
+        query_vector: Sequence[float] | None,
         *,
         config: RetrievalConfig,
-        where: Optional[Where] = None,
-        source: Optional[str] = None,
-    ) -> List[Hit]:
+        where: Where | None = None,
+        source: str | None = None,
+    ) -> list[Hit]:
         """Retrieve the most relevant chunks for ``query``.
 
         Args:
@@ -214,8 +214,8 @@ class Retriever:
             mode = "keyword"
 
         n = config.resolved_candidates()
-        vector_results: List[Tuple[int, float]] = []
-        keyword_results: List[Tuple[int, float]] = []
+        vector_results: list[tuple[int, float]] = []
+        keyword_results: list[tuple[int, float]] = []
 
         if mode in ("hybrid", "vector") and query_vector is not None:
             vector_results = self.store.search_vector(
@@ -245,9 +245,7 @@ class Retriever:
             ordered = self._diversify(query_vector, ordered, config)
 
         ordered = ordered[: config.top_k]
-        hits = self._materialise(
-            ordered, vector_results, keyword_results
-        )
+        hits = self._materialise(ordered, vector_results, keyword_results)
         if config.expand_context > 0:
             hits = self._expand(hits, radius=config.expand_context)
         return hits
@@ -257,9 +255,9 @@ class Retriever:
     def _diversify(
         self,
         query_vector: Sequence[float],
-        ordered: Sequence[Tuple[int, float]],
+        ordered: Sequence[tuple[int, float]],
         config: RetrievalConfig,
-    ) -> List[Tuple[int, float]]:
+    ) -> list[tuple[int, float]]:
         scores = dict(ordered)
         vectors = self._load_vectors([doc_id for doc_id, _ in ordered])
         if not vectors:
@@ -272,7 +270,7 @@ class Retriever:
         )
         return [(doc_id, scores.get(doc_id, 0.0)) for doc_id in picked]
 
-    def _load_vectors(self, ids: Sequence[int]) -> Dict[int, List[float]]:
+    def _load_vectors(self, ids: Sequence[int]) -> dict[int, list[float]]:
         try:
             return self.store.vectors_for(ids)
         except Exception as exc:  # pragma: no cover - defensive
@@ -281,17 +279,17 @@ class Retriever:
 
     def _materialise(
         self,
-        ordered: Sequence[Tuple[int, float]],
-        vector_results: Sequence[Tuple[int, float]],
-        keyword_results: Sequence[Tuple[int, float]],
-    ) -> List[Hit]:
+        ordered: Sequence[tuple[int, float]],
+        vector_results: Sequence[tuple[int, float]],
+        keyword_results: Sequence[tuple[int, float]],
+    ) -> list[Hit]:
         distances = dict(vector_results)
         bm25 = dict(keyword_results)
         vector_ranks = {doc_id: i for i, (doc_id, _) in enumerate(vector_results, 1)}
         keyword_ranks = {doc_id: i for i, (doc_id, _) in enumerate(keyword_results, 1)}
 
         loaded = self.store.fetch([doc_id for doc_id, _ in ordered])
-        hits: List[Hit] = []
+        hits: list[Hit] = []
         for doc_id, score in ordered:
             hit = loaded.get(doc_id)
             if hit is None:
@@ -308,10 +306,10 @@ class Retriever:
             hits.append(hit)
         return hits
 
-    def _expand(self, hits: Sequence[Hit], *, radius: int) -> List[Hit]:
+    def _expand(self, hits: Sequence[Hit], *, radius: int) -> list[Hit]:
         """Widen each hit with its neighbouring chunks, without duplicating text."""
         seen: set[int] = set()
-        expanded: List[Hit] = []
+        expanded: list[Hit] = []
         for hit in hits:
             if hit.id in seen:
                 continue
@@ -321,7 +319,9 @@ class Retriever:
                 expanded.append(hit)
                 continue
             merged = "\n".join(
-                chunk.text for chunk in window if chunk.id not in seen or chunk.id == hit.id
+                chunk.text
+                for chunk in window
+                if chunk.id not in seen or chunk.id == hit.id
             )
             for chunk in window:
                 seen.add(chunk.id)
@@ -341,7 +341,7 @@ class Retriever:
         return expanded
 
 
-def _bm25_to_scores(results: Sequence[Tuple[int, float]]) -> List[Tuple[int, float]]:
+def _bm25_to_scores(results: Sequence[tuple[int, float]]) -> list[tuple[int, float]]:
     """Map FTS5's negative BM25 scores onto a friendlier 0..1 range.
 
     Only used for keyword-only mode, where there is nothing to fuse with; hybrid
@@ -354,6 +354,4 @@ def _bm25_to_scores(results: Sequence[Tuple[int, float]]) -> List[Tuple[int, flo
     span = hi - lo
     if span <= 0:
         return [(doc_id, 1.0) for doc_id, _ in results]
-    return [
-        (doc_id, (-score - lo) / span) for (doc_id, score) in results
-    ]
+    return [(doc_id, (-score - lo) / span) for (doc_id, score) in results]

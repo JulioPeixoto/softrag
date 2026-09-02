@@ -7,19 +7,19 @@ a whole orchestration framework.
 
 from __future__ import annotations
 
-import base64
 import os
-from typing import Any, Iterator, List, Optional, Sequence
+from collections.abc import Iterator, Sequence
+from typing import Any
 
 from ..errors import ChatError, ConfigurationError, EmbeddingError, MissingDependencyError
 
-__all__ = ["OpenAIEmbedder", "OpenAIChat"]
+__all__ = ["OpenAIChat", "OpenAIEmbedder"]
 
 DEFAULT_EMBED_MODEL = "text-embedding-3-small"
 DEFAULT_CHAT_MODEL = "gpt-4.1-mini"
 
 
-def _client(api_key: Optional[str], base_url: Optional[str], feature: str) -> Any:
+def _client(api_key: str | None, base_url: str | None, feature: str) -> Any:
     try:
         from openai import OpenAI
     except ImportError as exc:
@@ -56,9 +56,9 @@ class OpenAIEmbedder:
         self,
         model: str = DEFAULT_EMBED_MODEL,
         *,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        dimensions: Optional[int] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        dimensions: int | None = None,
         batch_size: int = 128,
     ) -> None:
         self.model = model
@@ -66,13 +66,15 @@ class OpenAIEmbedder:
         self.batch_size = max(1, batch_size)
         self._client = _client(api_key, base_url, "OpenAI embeddings")
 
-    def embed_query(self, text: str) -> List[float]:
+    def embed_query(self, text: str) -> list[float]:
         return self.embed_documents([text])[0]
 
-    def embed_documents(self, texts: Sequence[str]) -> List[List[float]]:
-        out: List[List[float]] = []
+    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        out: list[list[float]] = []
         for start in range(0, len(texts), self.batch_size):
-            batch = [t if t.strip() else " " for t in texts[start : start + self.batch_size]]
+            batch = [
+                t if t.strip() else " " for t in texts[start : start + self.batch_size]
+            ]
             kwargs: dict[str, Any] = {"model": self.model, "input": batch}
             if self.dimensions:
                 kwargs["dimensions"] = self.dimensions
@@ -107,11 +109,11 @@ class OpenAIChat:
         self,
         model: str = DEFAULT_CHAT_MODEL,
         *,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         temperature: float = 0.0,
-        max_tokens: Optional[int] = None,
-        system: Optional[str] = None,
+        max_tokens: int | None = None,
+        system: str | None = None,
     ) -> None:
         self.model = model
         self.temperature = temperature
@@ -119,8 +121,8 @@ class OpenAIChat:
         self.system = system
         self._client = _client(api_key, base_url, "OpenAI chat")
 
-    def _messages(self, prompt: str) -> List[dict]:
-        messages: List[dict] = []
+    def _messages(self, prompt: str) -> list[dict]:
+        messages: list[dict] = []
         if self.system:
             messages.append({"role": "system", "content": self.system})
         messages.append({"role": "user", "content": prompt})
@@ -156,9 +158,7 @@ class OpenAIChat:
         except Exception as exc:
             raise ChatError(f"OpenAI chat failed mid-stream: {exc}") from exc
 
-    def describe_image(
-        self, image_base64: str, *, mime_type: str, prompt: str
-    ) -> str:
+    def describe_image(self, image_base64: str, *, mime_type: str, prompt: str) -> str:
         """Caption an image. Used by :meth:`softrag.Rag.add_image`."""
         try:
             response = self._client.chat.completions.create(

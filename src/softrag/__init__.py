@@ -29,7 +29,9 @@ from .chunking import (
     SentenceChunker,
     by_separator,
 )
+from .aengine import AsyncRag, AsyncStreamingAnswer, connect_async
 from .engine import DEFAULT_PROMPT, Rag, RagConfig, connect
+from .eval import EvalResult, compare, evaluate, evaluate_engine
 from .errors import (
     ChatError,
     ConfigurationError,
@@ -45,12 +47,19 @@ from .errors import (
     UnsupportedFormatError,
 )
 from .providers import EchoChatModel, HashEmbedder, adapt_chat_model, adapt_embedder
+from .rerank import (
+    ChainReranker,
+    DedupeReranker,
+    LLMReranker,
+    ScoreFusionReranker,
+)
 from .retrieval import (
     RetrievalConfig,
     maximal_marginal_relevance,
     reciprocal_rank_fusion,
 )
 from .store import Store
+from .transforms import ContextualChunker, contextualize, expand_query, hyde
 from .types import (
     Answer,
     ChatModel,
@@ -67,7 +76,10 @@ from .types import (
 __all__ = [
     # Entry points
     "Rag",
+    "AsyncRag",
+    "AsyncStreamingAnswer",
     "connect",
+    "connect_async",
     "RagConfig",
     "DEFAULT_PROMPT",
     # Results
@@ -84,6 +96,10 @@ __all__ = [
     "Reranker",
     # Retrieval
     "RetrievalConfig",
+    "ChainReranker",
+    "DedupeReranker",
+    "LLMReranker",
+    "ScoreFusionReranker",
     "reciprocal_rank_fusion",
     "maximal_marginal_relevance",
     "Store",
@@ -92,6 +108,15 @@ __all__ = [
     "MarkdownChunker",
     "SentenceChunker",
     "by_separator",
+    # Evaluation and query transforms
+    "EvalResult",
+    "evaluate",
+    "evaluate_engine",
+    "compare",
+    "hyde",
+    "expand_query",
+    "contextualize",
+    "ContextualChunker",
     # Backends
     "HashEmbedder",
     "EchoChatModel",

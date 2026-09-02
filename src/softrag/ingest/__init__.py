@@ -9,8 +9,9 @@ from __future__ import annotations
 import fnmatch
 import logging
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any
 
 from ..errors import ExtractionError, IngestionError, UnsupportedFormatError
 from .formats import EXTRACTORS, extension_for, html_to_text
@@ -18,19 +19,19 @@ from .formats import EXTRACTORS, extension_for, html_to_text
 log = logging.getLogger("softrag.ingest")
 
 __all__ = [
-    "extract_file",
-    "extract_web",
-    "caption_image",
-    "discover_files",
+    "DEFAULT_EXCLUDES",
     "EXTRACTORS",
     "IMAGE_EXTENSIONS",
-    "DEFAULT_EXCLUDES",
+    "caption_image",
+    "discover_files",
+    "extract_file",
+    "extract_web",
 ]
 
 IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
 
 #: Directories nobody wants in a knowledge base.
-DEFAULT_EXCLUDES: Tuple[str, ...] = (
+DEFAULT_EXCLUDES: tuple[str, ...] = (
     "**/.git/**",
     "**/.hg/**",
     "**/.svn/**",
@@ -54,12 +55,12 @@ DEFAULT_EXCLUDES: Tuple[str, ...] = (
 #: what you want: a 200 MB log is not a document.
 MAX_AUTO_FILE_BYTES = 32 * 1024 * 1024
 
-FileInput = Union[str, os.PathLike, bytes, bytearray]
+FileInput = str | os.PathLike | bytes | bytearray
 
 
 def extract_file(
-    data: FileInput, *, name: Optional[str] = None
-) -> Tuple[str, str, Dict[str, Any]]:
+    data: FileInput, *, name: str | None = None
+) -> tuple[str, str, dict[str, Any]]:
     """Extract text from a file path or raw bytes.
 
     Args:
@@ -79,7 +80,7 @@ def extract_file(
         raw = bytes(data)
         filename = name or ""
         source = name or f"bytes:{len(raw)}"
-        metadata: Dict[str, Any] = {"kind": "bytes", "bytes": len(raw)}
+        metadata: dict[str, Any] = {"kind": "bytes", "bytes": len(raw)}
     else:
         path = Path(os.fspath(data))
         if not path.exists():
@@ -133,7 +134,7 @@ def extract_file(
     return text, source, metadata
 
 
-def extract_web(url: str, *, timeout: float = 30.0) -> Tuple[str, Dict[str, Any]]:
+def extract_web(url: str, *, timeout: float = 30.0) -> tuple[str, dict[str, Any]]:
     """Fetch a URL and reduce it to its main text.
 
     ``trafilatura`` is used when installed, since it is much better at throwing
@@ -163,7 +164,7 @@ def extract_web(url: str, *, timeout: float = 30.0) -> Tuple[str, Dict[str, Any]
                     downloaded, include_comments=False, include_tables=True
                 )
                 if text and text.strip():
-                    metadata: Dict[str, Any] = {"kind": "web", "url": url}
+                    metadata: dict[str, Any] = {"kind": "web", "url": url}
                     title = _trafilatura_title(trafilatura, downloaded)
                     if title:
                         metadata["title"] = title
@@ -198,7 +199,7 @@ def _trafilatura_title(module: Any, downloaded: Any) -> str:
     return title or ""
 
 
-def _fetch(url: str, *, timeout: float) -> Tuple[str, str]:
+def _fetch(url: str, *, timeout: float) -> tuple[str, str]:
     """Fetch a URL with httpx when available, urllib otherwise."""
     headers = {
         "User-Agent": "softrag/1.0 (+https://github.com/JulioPeixoto/softrag)",
@@ -228,7 +229,9 @@ def _fetch(url: str, *, timeout: float) -> Tuple[str, str]:
             raw = response.read()
             content_type = response.headers.get("Content-Type", "").lower()
     except urllib.error.HTTPError as exc:
-        raise IngestionError(f"Could not fetch {url}: HTTP {exc.code} {exc.reason}") from exc
+        raise IngestionError(
+            f"Could not fetch {url}: HTTP {exc.code} {exc.reason}"
+        ) from exc
     except Exception as exc:
         raise IngestionError(f"Could not fetch {url}: {exc}") from exc
 
@@ -248,9 +251,7 @@ DEFAULT_CAPTION_PROMPT = (
 )
 
 
-def caption_image(
-    path: Path, chat_model: Any, *, prompt: Optional[str] = None
-) -> str:
+def caption_image(path: Path, chat_model: Any, *, prompt: str | None = None) -> str:
     """Describe an image so it can be retrieved by text search.
 
     Args:
@@ -329,7 +330,7 @@ def discover_files(
     exclude: Sequence[str] = (),
     recursive: bool = True,
     max_bytes: int = MAX_AUTO_FILE_BYTES,
-) -> List[Path]:
+) -> list[Path]:
     """Find indexable files under ``base``.
 
     Directories that never belong in a knowledge base -- ``.git``,
@@ -350,7 +351,7 @@ def discover_files(
         pattern = pattern[3:]
 
     patterns = tuple(DEFAULT_EXCLUDES) + tuple(exclude)
-    found: List[Path] = []
+    found: list[Path] = []
     for path in sorted(base.glob(pattern)):
         if not path.is_file():
             continue

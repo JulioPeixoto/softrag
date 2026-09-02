@@ -17,11 +17,12 @@ safe by construction.
 from __future__ import annotations
 
 import json
-from typing import Any, List, Mapping, Sequence, Tuple
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from .errors import ConfigurationError
 
-__all__ = ["compile_where", "SQL_TRUE"]
+__all__ = ["SQL_TRUE", "compile_where"]
 
 SQL_TRUE = "1"
 
@@ -39,7 +40,7 @@ _LOGICAL = {"$and": "AND", "$or": "OR"}
 
 def compile_where(
     where: Mapping[str, Any] | None, *, column: str = "d.metadata"
-) -> Tuple[str, List[Any]]:
+) -> tuple[str, list[Any]]:
     """Compile a filter mapping into ``(sql_predicate, params)``.
 
     The predicate is always safe to drop into a ``WHERE`` clause and evaluates to
@@ -62,11 +63,16 @@ def compile_where(
     return sql, params
 
 
-def _compile_mapping(where: Mapping[str, Any], column: str) -> Tuple[str, List[Any]]:
-    clauses: List[str] = []
-    params: List[Any] = []
+def _compile_mapping(where: Mapping[str, Any], column: str) -> tuple[str, list[Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
     for key, value in where.items():
-        if key in _LOGICAL:
+        if key.startswith("$."):
+            # A raw JSON path, the escape hatch for anything the dotted syntax
+            # cannot express (array indexing, most usefully). Unambiguous
+            # against the operators, which are "$and"/"$or"/"$not".
+            sub_sql, sub_params = _compile_field(key, value, column)
+        elif key in _LOGICAL:
             sub_sql, sub_params = _compile_logical(key, value, column)
         elif key == "$not":
             inner_sql, inner_params = _compile_operand(value, column)
@@ -87,15 +93,15 @@ def _compile_mapping(where: Mapping[str, Any], column: str) -> Tuple[str, List[A
     return "(" + " AND ".join(clauses) + ")", params
 
 
-def _compile_logical(op: str, value: Any, column: str) -> Tuple[str, List[Any]]:
+def _compile_logical(op: str, value: Any, column: str) -> tuple[str, list[Any]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise ConfigurationError(
             f"{op} expects a list of filter expressions, got {type(value).__name__}."
         )
     if not value:
         return SQL_TRUE, []
-    parts: List[str] = []
-    params: List[Any] = []
+    parts: list[str] = []
+    params: list[Any] = []
     for operand in value:
         sql, sub_params = _compile_operand(operand, column)
         parts.append(sql)
@@ -104,7 +110,7 @@ def _compile_logical(op: str, value: Any, column: str) -> Tuple[str, List[Any]]:
     return "(" + joiner.join(parts) + ")", params
 
 
-def _compile_operand(operand: Any, column: str) -> Tuple[str, List[Any]]:
+def _compile_operand(operand: Any, column: str) -> tuple[str, list[Any]]:
     if not isinstance(operand, Mapping):
         raise ConfigurationError(
             f"Expected a filter expression (a dict), got {type(operand).__name__}."
@@ -112,32 +118,41 @@ def _compile_operand(operand: Any, column: str) -> Tuple[str, List[Any]]:
     return _compile_mapping(operand, column)
 
 
-def _compile_field(field: str, value: Any, column: str) -> Tuple[str, List[Any]]:
+def _compile_field(field: str, value: Any, column: str) -> tuple[str, list[Any]]:
     path = _json_path(field)
     extract = f"json_extract({column}, ?)"
 
     if not isinstance(value, Mapping):
         # Bare value means equality. JSON booleans round-trip as 0/1 integers.
+        # None is the exception: "= NULL" is never true in SQL, so a filter for
+        # a JSON null has to become an IS NULL test to match anything.
+        if value is None:
+            return f"{extract} IS NULL", [path]
         return f"{extract} = ?", [path, _bind(value)]
 
     if len(value) != 1:
         # {"$gte": 1, "$lt": 10} is a conjunction; compile each half.
-        parts: List[str] = []
-        params: List[Any] = []
+        parts: list[str] = []
+        params: list[Any] = []
         for op, operand in value.items():
             sql, sub = _compile_field(field, {op: operand}, column)
             parts.append(sql)
             params.extend(sub)
         return "(" + " AND ".join(parts) + ")", params
 
-    (op, operand), = value.items()
+    ((op, operand),) = value.items()
 
     if op in _COMPARISON:
+        if operand is None and op in ("$eq", "$ne"):
+            test = "IS NULL" if op == "$eq" else "IS NOT NULL"
+            return f"{extract} {test}", [path]
         return f"{extract} {_COMPARISON[op]} ?", [path, _bind(operand)]
 
     if op in ("$in", "$nin"):
         if not isinstance(operand, Sequence) or isinstance(operand, (str, bytes)):
-            raise ConfigurationError(f"{op} expects a list, got {type(operand).__name__}.")
+            raise ConfigurationError(
+                f"{op} expects a list, got {type(operand).__name__}."
+            )
         if not operand:
             # An empty set matches nothing ($in) or everything ($nin).
             return ("0", []) if op == "$in" else (SQL_TRUE, [])
@@ -170,7 +185,11 @@ def _compile_field(field: str, value: Any, column: str) -> Tuple[str, List[Any]]
 
 
 def _json_path(field: str) -> str:
-    """Build a JSON path for a field name, supporting dotted nesting."""
+    """Build a JSON path for a field name, supporting dotted nesting.
+
+    A name already written as a JSON path (``"$.items[0].sku"``) is passed
+    through untouched, which is the only way to reach an array element.
+    """
     if field.startswith("$."):
         return field
     parts = field.split(".")

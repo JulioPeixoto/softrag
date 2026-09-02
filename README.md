@@ -1,117 +1,347 @@
-# softrag [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/) [![PyPI version](https://img.shields.io/pypi/v/softrag.svg)](https://pypi.org/project/softrag/)
-
 <div align="center">
-  <img src="piriquito.png" width="150" alt="SoftRAG mascot – periquito"/>
+  <img src="piriquito.png" width="150" alt="softrag mascot, a periquito"/>
+
+  <h1>softrag</h1>
+
+  <p><strong>The embedded RAG engine: hybrid retrieval in a single SQLite file, no server, no vendor account.</strong></p>
+
+  <p>
+    <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+    <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
+    <a href="https://pypi.org/project/softrag/"><img src="https://img.shields.io/pypi/v/softrag.svg" alt="PyPI version"></a>
+  </p>
 </div>
 
-Minimal **local-first** multimodal Retrieval-Augmented Generation (RAG) library powered by **SQLite + sqlite-vec**.  
-Everything—documents, embeddings, cache—lives in a single `.db` file.
+SQLite is what you reach for when a database should be a file. softrag is that,
+for retrieval: chunk text, metadata, the vector index and the full-text index
+all live in one `.db` file you can copy, commit, ship, back up with `cp`, or
+delete. The core install is one dependency (`sqlite-vec`); every model backend
+is optional and pluggable, including fully local ones.
 
-created by [Julio Peixoto](https://gh.com/JulioPeixoto).
-
----
-
-## 🌟 Features
-
-- **Local-first** – All processing happens locally, no external services required for storage
-- **SQLite + sqlite-vec** – Documents, embeddings, and cache in a single `.db` file
-- **Model-agnostic** – Works with OpenAI, Hugging Face, Ollama, or any compatible models
-- **Blazing-fast** – Optimized for minimal overhead and maximum throughput
-- **Multi-format support** – PDF, DOCX, Markdown, text files, web pages, and **images**
-- **Image understanding** – Uses GPT-4 Vision to analyze and describe images for semantic search
-- **Hybrid retrieval** – Combines keyword search (FTS5) and semantic similarity
-- **Unified search** – Query across text documents and image descriptions seamlessly
-
-## 🚀 Quick Start
+## Quickstart
 
 ```bash
 pip install softrag
 ```
 
 ```python
-from softrag import Rag
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+import softrag
 
-# Initialize
-rag = Rag(
-    embed_model=OpenAIEmbeddings(model="text-embedding-3-small"),
-    chat_model=ChatOpenAI(model="gpt-4o")
+rag = softrag.connect("kb.db")          # picks a backend up from the environment
+rag.add("handbook.pdf")                 # a file
+rag.add("https://example.com/changelog")  # a URL
+rag.add("Refunds are processed within 5 business days.")  # raw text
+
+answer = rag.query("How long do refunds take?")
+print(answer)            # Answer is a str, so this just works
+print(answer.sources)    # ['handbook.pdf', ...]
+```
+
+`connect()` detects models from the environment (`OPENAI_API_KEY`, a running
+Ollama daemon, an installed `sentence-transformers`) and falls back to a
+dependency-free hash embedder with a loud warning, so the snippet above runs
+even with nothing configured. To be explicit:
+
+```python
+from softrag.providers.openai import OpenAIChat, OpenAIEmbedder
+
+rag = softrag.connect(
+    "kb.db",
+    embed_model=OpenAIEmbedder("text-embedding-3-small"),
+    chat_model=OpenAIChat("gpt-4.1-mini"),
+)
+```
+
+## Why softrag
+
+|                          | softrag                       | Chroma                | LanceDB                  | LlamaIndex                    | raw sqlite-vec        |
+| ------------------------ | ----------------------------- | --------------------- | ------------------------ | ----------------------------- | --------------------- |
+| Infrastructure           | none — a file                 | embedded or server    | none — a directory       | none, but BYO store           | none — a file         |
+| Core install             | 1 package (`sqlite-vec`)      | ~30 transitive deps   | ~10 transitive deps      | large framework + integrations| 1 package             |
+| Hybrid dense + BM25      | built in, RRF-fused           | vectors only          | full-text index, opt-in  | via a retriever you assemble  | you write it          |
+| Metadata filtering       | built in (`$gte`, `$in`, …)   | yes                   | SQL predicates           | yes, per store                | you write the SQL     |
+| Works fully offline      | yes (Ollama / local models)   | yes                   | yes                      | depends on the pieces         | yes                   |
+| Index portability        | one file, `cp` it             | a directory           | a directory              | n/a                           | one file              |
+| Document extraction      | built in (PDF, Office, web…)  | no                    | no                       | yes, extensive                | no                    |
+
+**Where softrag is the wrong tool.** It is a single-file embedded index, not a
+distributed store: there is no sharding, no replication, no multi-writer
+cluster. Vector search is exact (a full scan under `vec0`), which is excellent
+up to a few hundred thousand chunks and the wrong shape at 50M+ vectors — reach
+for a real vector database there. Concurrent readers are fine (WAL); concurrent
+*writers* serialise on SQLite's write lock. And LlamaIndex covers far more
+document connectors and agent patterns than softrag intends to.
+
+**Where it fits.** A knowledge base that ships with your app. A CLI that answers
+questions about a repo. A desktop tool that must work on a plane. A test suite
+that needs a real index without standing up a service. Anything where "add a
+vector database" is a bigger commitment than the feature is worth.
+
+## How retrieval works
+
+Dense vectors find text that *means* the right thing; BM25 finds text that
+*says* the right thing — the error code, the product SKU, the surname. Neither
+one alone is enough, so softrag runs both and fuses the two ranked lists with
+**Reciprocal Rank Fusion**. RRF works on ranks, not scores, which matters: FTS5's
+BM25 score is negative and unbounded while cosine distance is bounded in `[0, 2]`,
+so adding or comparing them directly lets whichever scale happens to be larger
+dominate for reasons unrelated to relevance. Throwing the magnitudes away and
+keeping only the ordering needs no calibration at all.
+
+```
+query ──┬─► embed ─► vec0 KNN ────► [12, 4, 7, 3, …]  ┐
+        │                                             ├─► RRF ─► top_k ─► (MMR) ─► (expand) ─► hits
+        └─► FTS5 MATCH (BM25) ───► [4, 19, 12, 8, …]  ┘
+
+              score(doc) = Σ  weight_i / (k + rank_i(doc))      k = 60
+```
+
+`k = 60` is the constant from the original RRF paper (Cormack et al., 2009). It
+damps the influence of the very top ranks just enough that one retriever cannot
+veto the other: a document ranked #1 by vectors and unranked by BM25 does not
+automatically beat one both retrievers put in their top five.
+
+Each retriever contributes `candidates` documents before fusion
+(`max(4 * top_k, 20)` by default) — over-fetching is cheap and helps fusion a
+lot. Optional passes follow: MMR for diversity, then neighbouring-chunk
+expansion. See [docs/retrieval.md](docs/retrieval.md) for the full treatment.
+
+## Core API
+
+### Ingestion
+
+```python
+rag.add("report.pdf")                     # dispatches on the input: path, URL or text
+rag.add_file("notes.docx", metadata={"team": "legal"})
+rag.add_web("https://example.com/post", metadata={"year": 2025})
+rag.add_text("Raw string content", name="policy-v3")
+rag.add_image("architecture.png")         # captioned by a vision model, then indexed as text
+rag.add_directory("./docs", pattern="**/*.md", exclude=("**/drafts/**",))
+rag.add_many(["a.pdf", "b.md", "https://example.com"], max_workers=8)
+```
+
+Every `add*` call returns an `IngestResult` telling you what actually happened:
+
+```python
+result = rag.add("handbook.pdf")
+print(result.chunks_added, result.chunks_skipped, result.chunks_deleted)
+if not result:                            # falsy when result.error is set
+    print(result.error)
+```
+
+Re-adding an unchanged source is a no-op. Re-adding *changed* content replaces
+the old chunks by default; `on_change="skip"` keeps the old version and
+`on_change="append"` keeps both.
+
+### Retrieval
+
+```python
+hits = rag.search(
+    "refund window",
+    top_k=8,
+    mode="hybrid",                        # or "vector" / "keyword"
+    where={"team": "legal", "year": {"$gte": 2024}},
+    diversity=0.4,                        # MMR: 0 = pure relevance, 1 = maximally different
+    expand_context=1,                     # glue on the chunk before and after each hit
 )
 
-# Add different types of content
-rag.add_file("document.pdf")
-rag.add_web("https://example.com/article")
-rag.add_image("photo.jpg")  # 🆕 Image support!
-
-# Query across all content types
-answer = rag.query("What is shown in the image and how does it relate to the document?")
-print(answer)
+for hit in hits:
+    print(f"{hit.score:.4f}  {hit.source}#{hit.index}  {hit.ranks}")
+    print(hit.text[:200])
 ```
 
-## 📚 Documentation
+`search()` calls no chat model. Whatever it returns is exactly what a generated
+answer would have been built from, which makes it the honest way to tell a
+retrieval problem apart from a generation problem.
 
-For complete documentation, examples, and advanced usage, see: **[docs/softrag.md](docs/softrag.md)**
+### Generation
 
-## 🛠️ Next Steps
+```python
+answer = rag.query("What changed in the refund policy?", top_k=5)
+print(answer)               # Answer subclasses str
+print(answer.sources)       # unique source ids, best-scoring first
+print(answer.hits)          # the Hit objects behind it
+print(answer.context)       # the context exactly as the model saw it
+print(answer.prompt)        # the fully rendered prompt
 
-- Documentation Creation: Develop comprehensive documentation using tools like Sphinx or MkDocs to provide clear guidance on installation, usage, and contribution.
-- Image Support in RAG: Integrate capabilities to handle image data, enabling the retrieval and generation of content based on visual inputs. This could involve incorporating models like CLIP for image embeddings.
-- Automated Testing: Implement unit and integration tests using frameworks such as pytest to ensure code reliability and facilitate maintenance.
-- Support for Multiple LLM Backends: Extend compatibility to include various language model providers, such as OpenAI, Hugging Face Transformers, and local models, offering users flexibility in choosing their preferred backend.
-- Enhanced Context Retrieval: Improve the relevance of retrieved documents by integrating reranking techniques or advanced retrieval models, ensuring more accurate and contextually appropriate responses.
-- Performance Benchmarking: Conduct performance evaluations to assess Softrag's efficiency and scalability, comparing it with other RAG solutions to identify areas for optimization.
-- Monitoring and Logging: Implement logging mechanisms to track system operations and facilitate debugging, as well as monitoring tools to observe performance metrics and system health.
-
-## 🤝 Contributing
-
-We welcome contributions! Here's how to get started:
-
-### Development Setup
-
-This project uses [uv](https://docs.astral.sh/uv/) for dependency management. Make sure you have it installed:
-
-```bash
-# Install uv if you haven't already
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# Streaming
+stream = rag.query("Summarise the changelog", stream=True)
+for delta in stream:
+    print(delta, end="", flush=True)
+print("\nSources:", stream.sources)   # hits are available before generation starts
 ```
 
-### Getting Started
+The default prompt numbers each context block and asks for `[1]`-style
+citations; override it per call with `prompt=` or globally with
+`config.prompt`.
 
-1. **Fork and clone the repository:**
-   ```bash
-   git clone https://github.com/yourusername/softrag.git
-   cd softrag
-   ```
+### Management
 
-2. **Install dependencies with uv:**
-   ```bash
-   uv sync --dev
-   ```
+```python
+for info in rag.sources():
+    print(info.source, info.chunks, info.characters, info.added_at)
 
-3. **Activate the virtual environment:**
-   ```bash
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
+rag.delete(source="handbook.pdf")         # remove one document
+rag.delete(where={"year": {"$lt": 2020}}) # remove by metadata filter
+rag.reset()                               # empty the index, keep the file
+rag.optimize()                            # compact FTS + VACUUM
 
-### Making Changes
+stats = rag.stats()
+print(stats.documents, stats.sources, stats.dimensions, f"{stats.size_mb:.1f} MB")
 
-1. Create a new branch for your feature/fix
-2. Make your changes
-3. Add tests if applicable
-4. Ensure all tests pass
-5. Submit a pull request
+len(rag)                                  # chunk count
+rag.close()                               # or use Rag as a context manager
+```
 
-### Project Structure
+## Metadata filtering
 
-- `src/softrag/` - Main library code
-- `docs/` - Documentation
-- `examples/` - Usage examples
-- `tests/` - Test suite
+Filters are plain dicts, compiled to parameterised SQL over the JSON metadata
+column — values are never interpolated into the query string.
 
-## 📜 License
+```python
+{"team": "legal"}                          # equality (bare value)
+{"year": {"$eq": 2025}}                    # explicit equality
+{"status": {"$ne": "draft"}}               # not equal
+{"pages": {"$gt": 10}}                     # >
+{"year": {"$gte": 2024}}                   # >=
+{"score": {"$lt": 0.5}}                    # <
+{"year": {"$lte": 2025}}                   # <=
+{"ext": {"$in": [".md", ".rst"]}}          # membership
+{"ext": {"$nin": [".log"]}}                # negated membership
+{"title": {"$like": "%invoice%"}}          # SQL LIKE
+{"tags": {"$contains": "urgent"}}          # element of a JSON array, or a substring
+{"author": {"$exists": True}}              # key present / absent
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+{"$and": [{"team": "legal"}, {"year": 2025}]}
+{"$or":  [{"year": 2024}, {"pinned": True}]}
+{"$not": {"status": "archived"}}
 
-## Give to us your star ⭐
+{"year": {"$gte": 2024, "$lt": 2026}}      # two operators on one field = AND
+{"doc.author.name": "Ada"}                 # dotted paths reach into nested metadata
+```
 
-Developed with ❤️ for community
+Filters work on `search()`, `query()` and `delete()`. File ingestion attaches
+`kind`, `filename`, `extension`, `bytes` and `path` automatically, so
+`where={"extension": ".md"}` works with no extra bookkeeping.
+
+## Model backends
+
+With no models passed, `connect()` walks this order:
+
+**Embeddings** — `OPENAI_API_KEY` → a reachable Ollama daemon → an installed
+`sentence-transformers` → `HashEmbedder` (with a warning).
+**Chat** — `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → a reachable Ollama daemon →
+`EchoChatModel` (with a warning).
+
+`HashEmbedder` and `EchoChatModel` are deliberately terrible at their jobs but
+need no network, no key and no download — they exist so examples and tests run
+anywhere. `EchoChatModel` returns the prompt verbatim, which makes a bad answer
+unambiguously a retrieval problem.
+
+```python
+# OpenAI (pip install 'softrag[openai]')
+from softrag.providers.openai import OpenAIEmbedder, OpenAIChat
+rag = softrag.connect("kb.db",
+    embed_model=OpenAIEmbedder("text-embedding-3-small", dimensions=512),
+    chat_model=OpenAIChat("gpt-4.1-mini", temperature=0))
+
+# Anthropic (pip install 'softrag[anthropic]') — chat only; pair with any embedder
+from softrag.providers.anthropic import AnthropicChat
+rag = softrag.connect("kb.db", chat_model=AnthropicChat("claude-sonnet-5"))
+
+# Ollama — fully local, no SDK, plain HTTP
+from softrag.providers.ollama import OllamaEmbedder, OllamaChat
+rag = softrag.connect("kb.db",
+    embed_model=OllamaEmbedder("nomic-embed-text"),
+    chat_model=OllamaChat("llama3.2"))
+
+# sentence-transformers (pip install 'softrag[local]')
+from softrag.providers.local import SentenceTransformerEmbedder, CrossEncoderReranker
+rag = softrag.connect("kb.db",
+    embed_model=SentenceTransformerEmbedder("sentence-transformers/all-MiniLM-L6-v2"),
+    reranker=CrossEncoderReranker())   # pip install 'softrag[rerank]'
+```
+
+**Bring your own.** Anything with the right shape is accepted and adapted:
+an object with `embed_query`/`embed_documents` (LangChain, softrag), an object
+with `encode` (sentence-transformers), a Chroma-style function taking a list, or
+a bare callable.
+
+```python
+rag = softrag.connect(
+    "kb.db",
+    embed_model=lambda text: my_model.vectorise(text),   # str -> list[float]
+    chat_model=lambda prompt: my_llm.generate(prompt),   # str -> str
+)
+
+# LangChain objects work as-is (embed_query / invoke are both recognised)
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+rag = softrag.connect("kb.db",
+    embed_model=OpenAIEmbeddings(model="text-embedding-3-small"),
+    chat_model=ChatOpenAI(model="gpt-4.1-mini"))
+```
+
+See [docs/providers.md](docs/providers.md) to write your own in about ten lines.
+
+## Installation extras
+
+| Extra                       | Pulls in                    | You need it for                                        |
+| --------------------------- | --------------------------- | ------------------------------------------------------ |
+| *(none)*                    | `sqlite-vec`                | The engine, storage, hybrid search, text/HTML/Office/CSV/JSON ingest |
+| `softrag[openai]`           | `openai`                    | OpenAI embeddings and chat, or any OpenAI-compatible server (vLLM, LM Studio) |
+| `softrag[anthropic]`        | `anthropic`                 | Claude chat and vision                                 |
+| `softrag[local]`            | `sentence-transformers`     | Local embeddings, no network after the model downloads |
+| `softrag[rerank]`           | `sentence-transformers`     | `CrossEncoderReranker` as a second-stage reranker      |
+| `softrag[files]`            | `pypdf`                     | Reading PDFs                                           |
+| `softrag[web]`              | `httpx`, `trafilatura`      | Better URL fetching and boilerplate-free web extraction |
+| `softrag[cli]`              | `rich`                      | The `softrag` command-line interface                   |
+| `softrag[all]`              | everything above            | Trying things out                                      |
+
+Ollama needs no extra at all — softrag talks to it over plain HTTP with the
+standard library.
+
+## Supported formats
+
+| Kind      | Extensions                                                                   |
+| --------- | ---------------------------------------------------------------------------- |
+| Text      | `.txt` `.text` `.md` `.markdown` `.rst` `.org` `.log`                        |
+| Markup    | `.html` `.htm` `.xhtml` `.xml`                                               |
+| Documents | `.pdf` (needs `softrag[files]`), `.docx`, `.pptx`, `.xlsx`, `.xlsm`, `.epub` |
+| Data      | `.csv` `.tsv` `.json` `.jsonl` `.ndjson`                                     |
+| Code      | `.py` `.js` `.ts` `.go` `.rs` `.java` `.rb` `.c` `.cpp` `.sql` `.sh` `.toml` `.yaml` and ~25 more |
+| Images    | `.png` `.jpg` `.jpeg` `.gif` `.webp` `.bmp` via `add_image()` + a vision model |
+| Web       | any URL via `add_web()`                                                      |
+
+DOCX, PPTX, XLSX and EPUB are read with the standard library alone — they are
+ZIP archives of XML, and softrag unzips them itself. Only PDF needs a
+third-party parser. Unknown extensions that look like text are read as text, and
+`softrag.ingest.EXTRACTORS[".rtf"] = my_extractor` teaches it a new format.
+
+## What's included
+
+Beyond the engine, the package ships a `softrag` command-line interface
+(`softrag[cli]`) plus `softrag.rerank`, `softrag.eval` and `softrag.transforms`
+modules for second-stage reranking, retrieval evaluation and query
+transformation. Those are documented separately.
+
+## Documentation
+
+| Guide                                      | What it covers                                                     |
+| ------------------------------------------ | ------------------------------------------------------------------ |
+| [docs/quickstart.md](docs/quickstart.md)   | Install to first answer, including a fully offline path             |
+| [docs/retrieval.md](docs/retrieval.md)     | Hybrid search, RRF, tuning, MMR, filters, debugging bad retrieval   |
+| [docs/ingestion.md](docs/ingestion.md)     | Formats, chunking strategies, metadata, idempotent re-ingest        |
+| [docs/providers.md](docs/providers.md)     | Every backend and how to write your own                             |
+| [docs/architecture.md](docs/architecture.md) | The SQLite schema and why it looks like that                      |
+| [docs/faq.md](docs/faq.md)                 | Scale, concurrency, backups, changing embedding models              |
+| [examples/](examples/)                     | Runnable scripts, two of which need no API key                      |
+
+## Contributing
+
+Bug reports, format extractors and provider adapters are all welcome. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, tests and PR conventions.
+
+Release notes live in [CHANGELOG.md](CHANGELOG.md). Licensed under the MIT
+License — see [LICENSE](LICENSE).
+
+Created by [Julio Peixoto](https://github.com/JulioPeixoto).

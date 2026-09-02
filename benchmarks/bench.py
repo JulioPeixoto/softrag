@@ -25,21 +25,64 @@ import statistics
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from softrag import EchoChatModel, HashEmbedder, Rag  # noqa: E402
+from softrag import EchoChatModel, HashEmbedder, Rag
 
-WORDS = """
-retrieval augmented generation embedding vector database sqlite index query
-document chunk semantic search keyword hybrid ranking fusion reciprocal rank
-model context window token latency throughput cache storage engine schema
-migration transaction concurrency thread process memory disk network cluster
-python rust javascript compiler runtime garbage collector allocation pointer
-""".split()
+WORDS = [
+    "retrieval",
+    "augmented",
+    "generation",
+    "embedding",
+    "vector",
+    "database",
+    "sqlite",
+    "index",
+    "query",
+    "document",
+    "chunk",
+    "semantic",
+    "search",
+    "keyword",
+    "hybrid",
+    "ranking",
+    "fusion",
+    "reciprocal",
+    "rank",
+    "model",
+    "context",
+    "window",
+    "token",
+    "latency",
+    "throughput",
+    "cache",
+    "storage",
+    "engine",
+    "schema",
+    "migration",
+    "transaction",
+    "concurrency",
+    "thread",
+    "process",
+    "memory",
+    "disk",
+    "network",
+    "cluster",
+    "python",
+    "rust",
+    "javascript",
+    "compiler",
+    "runtime",
+    "garbage",
+    "collector",
+    "allocation",
+    "pointer",
+]
 
 
 @dataclass
@@ -57,11 +100,11 @@ class Timing:
     @classmethod
     def measure(
         cls, label: str, fn: Callable[[int], Any], *, runs: int, warmup: int = 3
-    ) -> "Timing":
+    ) -> Timing:
         for i in range(warmup):
             fn(i)
         gc.collect()
-        durations: List[float] = []
+        durations: list[float] = []
         for i in range(runs):
             start = time.perf_counter()
             fn(i)
@@ -88,7 +131,7 @@ class SizeResult:
     chunks_per_second: float
     db_bytes: int
     bytes_per_chunk: float
-    timings: List[Timing] = field(default_factory=list)
+    timings: list[Timing] = field(default_factory=list)
 
 
 def make_document(rng: random.Random, words: int = 220) -> str:
@@ -136,9 +179,7 @@ def run_size(
         rag.optimize()
         size = db_path.stat().st_size
 
-        probes = [
-            " ".join(rng.sample(WORDS, rng.randint(2, 6))) for _ in range(queries)
-        ]
+        probes = [" ".join(rng.sample(WORDS, rng.randint(2, 6))) for _ in range(queries)]
 
         timings = [
             Timing.measure(
@@ -165,9 +206,7 @@ def run_size(
             ),
             Timing.measure(
                 "search + mmr",
-                lambda i: rag.search(
-                    probes[i % len(probes)], top_k=5, diversity=0.5
-                ),
+                lambda i: rag.search(probes[i % len(probes)], top_k=5, diversity=0.5),
                 runs=queries,
             ),
         ]
@@ -184,12 +223,14 @@ def run_size(
         )
 
 
-def render(results: List[SizeResult]) -> str:
+def render(results: list[SizeResult]) -> str:
     """Render results as aligned plain-text tables."""
-    lines: List[str] = []
+    lines: list[str] = []
     lines.append("ingest")
-    lines.append(f"{'chunks':>10} {'dim':>5} {'seconds':>9} {'chunks/s':>10} "
-                 f"{'db size':>10} {'bytes/chunk':>12}")
+    lines.append(
+        f"{'chunks':>10} {'dim':>5} {'seconds':>9} {'chunks/s':>10} "
+        f"{'db size':>10} {'bytes/chunk':>12}"
+    )
     for result in results:
         lines.append(
             f"{result.chunks:>10,} {result.dimensions:>5} "
@@ -218,7 +259,7 @@ def render(results: List[SizeResult]) -> str:
     return "\n".join(lines)
 
 
-def main(argv: List[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--sizes",
@@ -237,7 +278,7 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument("--json", type=Path, help="Also write raw results here.")
     args = parser.parse_args(argv)
 
-    results: List[SizeResult] = []
+    results: list[SizeResult] = []
     for size in args.sizes:
         print(f"benchmarking {size:,} chunks...", file=sys.stderr, flush=True)
         results.append(
@@ -252,7 +293,7 @@ def main(argv: List[str] | None = None) -> int:
     print(render(results))
 
     if args.json:
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "dimensions": args.dimensions,
             "results": [asdict(r) for r in results],
         }

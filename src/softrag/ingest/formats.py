@@ -15,27 +15,28 @@ import json
 import logging
 import re
 import zipfile
+from collections.abc import Callable
 from html import unescape
 from html.parser import HTMLParser
-from typing import Callable, Dict, List, Optional
+from typing import ClassVar
 
 from ..errors import ExtractionError, MissingDependencyError
 
 log = logging.getLogger("softrag.ingest")
 
 __all__ = [
-    "html_to_text",
-    "extract_text",
-    "extract_html",
-    "extract_pdf",
-    "extract_docx",
-    "extract_pptx",
-    "extract_xlsx",
-    "extract_epub",
-    "extract_csv",
-    "extract_json",
     "EXTRACTORS",
     "extension_for",
+    "extract_csv",
+    "extract_docx",
+    "extract_epub",
+    "extract_html",
+    "extract_json",
+    "extract_pdf",
+    "extract_pptx",
+    "extract_text",
+    "extract_xlsx",
+    "html_to_text",
 ]
 
 _WS = re.compile(r"[ \t]+")
@@ -68,15 +69,39 @@ def _decode(data: bytes) -> str:
 class _HTMLTextExtractor(HTMLParser):
     """Strip HTML to readable text, dropping non-content elements."""
 
-    SKIP = {"script", "style", "noscript", "svg", "head", "template", "iframe"}
-    BLOCK = {
-        "p", "div", "section", "article", "br", "li", "tr", "h1", "h2", "h3",
-        "h4", "h5", "h6", "blockquote", "pre", "table", "header", "footer",
+    SKIP: ClassVar[set[str]] = {
+        "script",
+        "style",
+        "noscript",
+        "svg",
+        "head",
+        "template",
+        "iframe",
+    }
+    BLOCK: ClassVar[set[str]] = {
+        "p",
+        "div",
+        "section",
+        "article",
+        "br",
+        "li",
+        "tr",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "blockquote",
+        "pre",
+        "table",
+        "header",
+        "footer",
     }
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.parts: List[str] = []
+        self.parts: list[str] = []
         self.title: str = ""
         self._skip_depth = 0
         self._in_title = False
@@ -182,7 +207,9 @@ def extract_pdf(data: bytes, *, filename: str = "") -> str:
                 pages = [page.get_text() for page in document]
             return _clean("\n\n".join(pages))
         except Exception as exc:
-            raise ExtractionError(f"Could not read PDF {filename or '<bytes>'}: {exc}") from exc
+            raise ExtractionError(
+                f"Could not read PDF {filename or '<bytes>'}: {exc}"
+            ) from exc
 
     raise MissingDependencyError("pypdf", extra="files", feature="Reading PDF files")
 
@@ -220,7 +247,9 @@ def extract_docx(data: bytes, *, filename: str = "") -> str:
                 "so it is not a DOCX. Legacy .doc files are not supported; convert "
                 "them to .docx first."
             )
-        parts = [_xml_to_text(archive.read("word/document.xml").decode("utf-8"), _DOCX_BREAK)]
+        parts = [
+            _xml_to_text(archive.read("word/document.xml").decode("utf-8"), _DOCX_BREAK)
+        ]
         for extra in ("word/footnotes.xml", "word/endnotes.xml"):
             if extra in names:
                 text = _xml_to_text(archive.read(extra).decode("utf-8"), _DOCX_BREAK)
@@ -233,7 +262,11 @@ def extract_pptx(data: bytes, *, filename: str = "") -> str:
     """PowerPoint decks, one section of text per slide."""
     with _open_zip(data, "PPTX") as archive:
         slides = sorted(
-            (n for n in archive.namelist() if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)),
+            (
+                n
+                for n in archive.namelist()
+                if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)
+            ),
             key=lambda n: int(re.findall(r"\d+", n)[-1]),
         )
         if not slides:
@@ -254,7 +287,7 @@ def extract_xlsx(data: bytes, *, filename: str = "") -> str:
     """
     with _open_zip(data, "XLSX") as archive:
         names = set(archive.namelist())
-        shared: List[str] = []
+        shared: list[str] = []
         if "xl/sharedStrings.xml" in names:
             raw = archive.read("xl/sharedStrings.xml").decode("utf-8")
             shared = [
@@ -262,16 +295,18 @@ def extract_xlsx(data: bytes, *, filename: str = "") -> str:
                 for item in re.findall(r"<si>(.*?)</si>", raw, re.DOTALL)
             ]
 
-        sheets = sorted(n for n in names if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n))
+        sheets = sorted(
+            n for n in names if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n)
+        )
         if not sheets:
             raise ExtractionError(f"{filename or 'This file'} contains no worksheets.")
 
-        blocks: List[str] = []
+        blocks: list[str] = []
         for name in sheets:
             raw = archive.read(name).decode("utf-8")
-            lines: List[str] = []
+            lines: list[str] = []
             for row in re.findall(r"<row[^>]*>(.*?)</row>", raw, re.DOTALL):
-                cells: List[str] = []
+                cells: list[str] = []
                 for cell in re.findall(r"<c[^>]*>.*?</c>|<c[^>]*/>", row, re.DOTALL):
                     value_match = re.search(r"<v>(.*?)</v>", cell, re.DOTALL)
                     if not value_match:
@@ -300,7 +335,9 @@ def extract_epub(data: bytes, *, filename: str = "") -> str:
         names = archive.namelist()
         documents = [n for n in names if n.lower().endswith((".xhtml", ".html", ".htm"))]
         if not documents:
-            raise ExtractionError(f"{filename or 'This file'} contains no readable chapters.")
+            raise ExtractionError(
+                f"{filename or 'This file'} contains no readable chapters."
+            )
         documents.sort()
         chapters = []
         for name in documents:
@@ -330,11 +367,11 @@ def extract_csv(data: bytes, *, filename: str = "") -> str:
     except StopIteration:
         return ""
 
-    lines: List[str] = []
+    lines: list[str] = []
     for row in reader:
         pairs = [
             f"{name.strip()}: {value.strip()}"
-            for name, value in zip(header, row)
+            for name, value in zip(header, row, strict=False)
             if value and value.strip()
         ]
         if pairs:
@@ -350,7 +387,7 @@ def extract_json(data: bytes, *, filename: str = "") -> str:
     if not text:
         return ""
 
-    documents: List[object] = []
+    documents: list[object] = []
     try:
         documents = [json.loads(text)]
     except json.JSONDecodeError:
@@ -365,16 +402,16 @@ def extract_json(data: bytes, *, filename: str = "") -> str:
         if not documents:
             raise ExtractionError(
                 f"{filename or 'This file'} is neither valid JSON nor JSON Lines."
-            )
+            ) from None
 
     blocks = ["\n".join(_flatten(doc)) for doc in documents]
     return _clean("\n\n".join(b for b in blocks if b))
 
 
-def _flatten(value: object, prefix: str = "") -> List[str]:
+def _flatten(value: object, prefix: str = "") -> list[str]:
     """Render nested JSON as flat, readable ``path: value`` lines."""
     if isinstance(value, dict):
-        lines: List[str] = []
+        lines: list[str] = []
         for key, item in value.items():
             lines.extend(_flatten(item, f"{prefix}.{key}" if prefix else str(key)))
         return lines
@@ -392,7 +429,7 @@ def _flatten(value: object, prefix: str = "") -> List[str]:
 #:
 #:     from softrag.ingest.formats import EXTRACTORS
 #:     EXTRACTORS[".rtf"] = my_rtf_extractor
-EXTRACTORS: Dict[str, Callable[..., str]] = {
+EXTRACTORS: dict[str, Callable[..., str]] = {
     ".txt": extract_text,
     ".text": extract_text,
     ".md": extract_text,
@@ -420,10 +457,43 @@ EXTRACTORS: Dict[str, Callable[..., str]] = {
 #: Source files are read as text; listed explicitly so directory walks can tell
 #: code apart from binaries without sniffing every file.
 CODE_EXTENSIONS = (
-    ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".go", ".rs",
-    ".c", ".h", ".cpp", ".hpp", ".cs", ".rb", ".php", ".swift", ".scala", ".sh",
-    ".bash", ".zsh", ".sql", ".r", ".jl", ".lua", ".pl", ".vim", ".toml",
-    ".yaml", ".yml", ".ini", ".cfg", ".conf", ".env", ".dockerfile", ".tf",
+    ".py",
+    ".pyi",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".java",
+    ".kt",
+    ".go",
+    ".rs",
+    ".c",
+    ".h",
+    ".cpp",
+    ".hpp",
+    ".cs",
+    ".rb",
+    ".php",
+    ".swift",
+    ".scala",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".sql",
+    ".r",
+    ".jl",
+    ".lua",
+    ".pl",
+    ".vim",
+    ".toml",
+    ".yaml",
+    ".yml",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".env",
+    ".dockerfile",
+    ".tf",
 )
 for _extension in CODE_EXTENSIONS:
     EXTRACTORS.setdefault(_extension, extract_text)

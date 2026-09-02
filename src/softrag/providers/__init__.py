@@ -9,9 +9,11 @@ protocols the rest of the library speaks.
 
 from __future__ import annotations
 
+import itertools
 import logging
 import os
-from typing import Any, Callable, Iterator, List, Optional, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any
 
 from ..errors import ChatError, ConfigurationError, EmbeddingError
 from ..types import ChatModel, Embedder
@@ -19,13 +21,13 @@ from ..types import ChatModel, Embedder
 log = logging.getLogger("softrag.providers")
 
 __all__ = [
-    "adapt_embedder",
-    "adapt_chat_model",
-    "embedder_fingerprint",
-    "auto_embedder",
-    "auto_chat_model",
-    "HashEmbedder",
     "EchoChatModel",
+    "HashEmbedder",
+    "adapt_chat_model",
+    "adapt_embedder",
+    "auto_chat_model",
+    "auto_embedder",
+    "embedder_fingerprint",
 ]
 
 
@@ -37,13 +39,13 @@ __all__ = [
 class _EmbedderAdapter:
     """Wraps a foreign embedding object in the :class:`Embedder` protocol."""
 
-    __slots__ = ("_target", "_query_fn", "_batch_fn", "_name")
+    __slots__ = ("_batch_fn", "_name", "_query_fn", "_target")
 
     def __init__(
         self,
         target: Any,
         query_fn: Callable[[str], Sequence[float]],
-        batch_fn: Optional[Callable[[Sequence[str]], Sequence[Sequence[float]]]],
+        batch_fn: Callable[[Sequence[str]], Sequence[Sequence[float]]] | None,
         name: str,
     ) -> None:
         self._target = target
@@ -51,14 +53,14 @@ class _EmbedderAdapter:
         self._batch_fn = batch_fn
         self._name = name
 
-    def embed_query(self, text: str) -> List[float]:
+    def embed_query(self, text: str) -> list[float]:
         try:
             vector = self._query_fn(text)
         except Exception as exc:
             raise EmbeddingError(f"{self._name} failed to embed a query: {exc}") from exc
         return _as_floats(vector, self._name)
 
-    def embed_documents(self, texts: Sequence[str]) -> List[List[float]]:
+    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
         try:
@@ -113,12 +115,15 @@ def adapt_embedder(embedder: Any) -> Embedder:
     batch = getattr(embedder, "embed_documents", None)
     if callable(query) or callable(batch):
         if not callable(query):
+
             def query(text: str, _batch=batch) -> Sequence[float]:  # type: ignore[misc]
                 return _batch([text])[0]
+
         return _EmbedderAdapter(embedder, query, batch if callable(batch) else None, name)
 
     encode = getattr(embedder, "encode", None)
     if callable(encode):
+
         def _encode_one(text: str) -> Sequence[float]:
             return _first_row(encode(text))
 
@@ -128,6 +133,7 @@ def adapt_embedder(embedder: Any) -> Embedder:
         return _EmbedderAdapter(embedder, _encode_one, _encode_many, name)
 
     if callable(embedder):
+
         def _call_one(text: str) -> Sequence[float]:
             result = embedder(text)
             return _first_row(result) if _looks_nested(result) else result
@@ -154,12 +160,12 @@ def adapt_embedder(embedder: Any) -> Embedder:
 class _ChatAdapter:
     """Wraps a foreign chat object in the :class:`ChatModel` protocol."""
 
-    __slots__ = ("_complete", "_stream", "_name")
+    __slots__ = ("_complete", "_name", "_stream")
 
     def __init__(
         self,
         complete: Callable[[str], str],
-        stream: Optional[Callable[[str], Iterator[str]]],
+        stream: Callable[[str], Iterator[str]] | None,
         name: str,
     ) -> None:
         self._complete = complete
@@ -256,22 +262,20 @@ class HashEmbedder:
             raise ConfigurationError("dimensions must be positive")
         self.dimensions = dimensions
 
-    def embed_query(self, text: str) -> List[float]:
+    def embed_query(self, text: str) -> list[float]:
         return self._embed(text)
 
-    def embed_documents(self, texts: Sequence[str]) -> List[List[float]]:
+    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         return [self._embed(text) for text in texts]
 
-    def _embed(self, text: str) -> List[float]:
+    def _embed(self, text: str) -> list[float]:
         import hashlib
         import math
 
         vector = [0.0] * self.dimensions
         tokens = text.lower().split()
         # Unigrams plus bigrams: enough signal to make ordering meaningful.
-        grams = tokens + [
-            f"{a}_{b}" for a, b in zip(tokens, tokens[1:])
-        ]
+        grams = tokens + [f"{a}_{b}" for a, b in itertools.pairwise(tokens)]
         for gram in grams:
             digest = hashlib.blake2b(gram.encode("utf-8"), digest_size=8).digest()
             slot = int.from_bytes(digest[:4], "little") % self.dimensions
@@ -298,8 +302,7 @@ class EchoChatModel:
         return prompt
 
     def stream(self, prompt: str) -> Iterator[str]:
-        for line in prompt.splitlines(keepends=True):
-            yield line
+        yield from prompt.splitlines(keepends=True)
 
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         return "EchoChatModel()"
@@ -310,7 +313,7 @@ class EchoChatModel:
 # --------------------------------------------------------------------------- #
 
 
-def auto_embedder(*, model: Optional[str] = None) -> Embedder:
+def auto_embedder(*, model: str | None = None) -> Embedder:
     """Pick an embedding model from what the environment makes available.
 
     The order is deliberate -- API keys first because they need no download,
@@ -329,9 +332,9 @@ def auto_embedder(*, model: Optional[str] = None) -> Embedder:
     Returns:
         A ready-to-use embedder.
     """
-    from . import openai as openai_provider
-    from . import ollama as ollama_provider
     from . import local as local_provider
+    from . import ollama as ollama_provider
+    from . import openai as openai_provider
 
     if os.getenv("OPENAI_API_KEY"):
         log.debug("auto-detected OpenAI embeddings")
@@ -355,7 +358,7 @@ def auto_embedder(*, model: Optional[str] = None) -> Embedder:
     return HashEmbedder()
 
 
-def auto_chat_model(*, model: Optional[str] = None) -> ChatModel:
+def auto_chat_model(*, model: str | None = None) -> ChatModel:
     """Pick a chat model from what the environment makes available.
 
     1. ``ANTHROPIC_API_KEY`` -> Claude
@@ -367,8 +370,8 @@ def auto_chat_model(*, model: Optional[str] = None) -> ChatModel:
         model: Force a specific model name for whichever backend is chosen.
     """
     from . import anthropic as anthropic_provider
-    from . import openai as openai_provider
     from . import ollama as ollama_provider
+    from . import openai as openai_provider
 
     if os.getenv("ANTHROPIC_API_KEY"):
         log.debug("auto-detected Anthropic")
@@ -436,9 +439,10 @@ def _takes_a_batch(embedder: Any) -> bool:
     import inspect
     import typing
 
-    target = embedder if inspect.isfunction(embedder) or inspect.ismethod(embedder) else (
-        getattr(type(embedder), "__call__", embedder)
-    )
+    if inspect.isfunction(embedder) or inspect.ismethod(embedder):
+        target = embedder
+    else:
+        target = type(embedder).__call__
     try:
         signature = inspect.signature(target)
     except (TypeError, ValueError):
@@ -471,7 +475,7 @@ def _takes_a_batch(embedder: Any) -> bool:
     return origin in (list, tuple, set, Sequence) or annotation in (list, tuple)
 
 
-def _as_floats(vector: Any, name: str) -> List[float]:
+def _as_floats(vector: Any, name: str) -> list[float]:
     """Coerce a backend's return value into a flat list of Python floats."""
     tolist = getattr(vector, "tolist", None)
     if callable(tolist):
@@ -488,7 +492,7 @@ def _as_floats(vector: Any, name: str) -> List[float]:
     return out
 
 
-def _as_rows(result: Any) -> List[Any]:
+def _as_rows(result: Any) -> list[Any]:
     tolist = getattr(result, "tolist", None)
     if callable(tolist):
         result = tolist()
@@ -510,8 +514,8 @@ def _looks_nested(result: Any) -> bool:
     if not rows:
         return False
     first = rows[0]
-    return isinstance(first, (list, tuple)) or hasattr(first, "__len__") and not isinstance(
-        first, (str, bytes, float, int)
+    return isinstance(first, (list, tuple)) or (
+        hasattr(first, "__len__") and not isinstance(first, (str, bytes, float, int))
     )
 
 

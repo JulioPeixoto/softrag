@@ -7,7 +7,8 @@ vision only. Pair it with any embedder -- OpenAI, Ollama or a local model.
 from __future__ import annotations
 
 import os
-from typing import Any, Iterator, List, Optional
+from collections.abc import Iterator
+from typing import Any
 
 from ..errors import ChatError, ConfigurationError, MissingDependencyError
 
@@ -36,10 +37,10 @@ class AnthropicChat:
         self,
         model: str = DEFAULT_MODEL,
         *,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         temperature: float = 0.0,
-        system: Optional[str] = None,
+        system: str | None = None,
     ) -> None:
         try:
             import anthropic
@@ -121,7 +122,7 @@ class AnthropicChat:
 
 def _text_of(message: Any) -> str:
     """Join the text blocks of a Messages API response."""
-    parts: List[str] = []
+    parts: list[str] = []
     for block in getattr(message, "content", []) or []:
         text = getattr(block, "text", None)
         if text is None and isinstance(block, dict):

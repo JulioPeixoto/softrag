@@ -8,18 +8,18 @@ specific failures when they care.
 from __future__ import annotations
 
 __all__ = [
-    "SoftragError",
-    "ConfigurationError",
-    "MissingDependencyError",
-    "StoreError",
-    "SchemaVersionError",
-    "DimensionMismatchError",
-    "IngestionError",
-    "UnsupportedFormatError",
-    "ExtractionError",
-    "ProviderError",
-    "EmbeddingError",
     "ChatError",
+    "ConfigurationError",
+    "DimensionMismatchError",
+    "EmbeddingError",
+    "ExtractionError",
+    "IngestionError",
+    "MissingDependencyError",
+    "ProviderError",
+    "SchemaVersionError",
+    "SoftragError",
+    "StoreError",
+    "UnsupportedFormatError",
 ]
 
 

@@ -13,13 +13,14 @@ import logging
 import os
 import urllib.error
 import urllib.request
-from typing import Any, Dict, Iterator, List, Optional, Sequence
+from collections.abc import Iterator, Sequence
+from typing import Any
 
 from ..errors import ChatError, EmbeddingError
 
 log = logging.getLogger("softrag.providers.ollama")
 
-__all__ = ["OllamaEmbedder", "OllamaChat", "is_available", "base_url"]
+__all__ = ["OllamaChat", "OllamaEmbedder", "base_url", "is_available"]
 
 DEFAULT_EMBED_MODEL = "nomic-embed-text"
 DEFAULT_CHAT_MODEL = "llama3.2"
@@ -46,7 +47,7 @@ def is_available(*, timeout: float = 0.5) -> bool:
         return False
 
 
-def _post(path: str, payload: Dict[str, Any], *, timeout: float) -> Dict[str, Any]:
+def _post(path: str, payload: dict[str, Any], *, timeout: float) -> dict[str, Any]:
     request = urllib.request.Request(
         f"{base_url()}{path}",
         data=json.dumps(payload).encode("utf-8"),
@@ -58,8 +59,8 @@ def _post(path: str, payload: Dict[str, Any], *, timeout: float) -> Dict[str, An
 
 
 def _post_stream(
-    path: str, payload: Dict[str, Any], *, timeout: float
-) -> Iterator[Dict[str, Any]]:
+    path: str, payload: dict[str, Any], *, timeout: float
+) -> Iterator[dict[str, Any]]:
     request = urllib.request.Request(
         f"{base_url()}{path}",
         data=json.dumps(payload).encode("utf-8"),
@@ -79,9 +80,7 @@ def _post_stream(
 
 def _explain(exc: Exception, model: str) -> str:
     if isinstance(exc, urllib.error.HTTPError) and exc.code == 404:
-        return (
-            f"Ollama has no model named {model!r}. Pull it first:  ollama pull {model}"
-        )
+        return f"Ollama has no model named {model!r}. Pull it first:  ollama pull {model}"
     if isinstance(exc, urllib.error.URLError):
         return (
             f"Could not reach Ollama at {base_url()}. Is it running? "
@@ -110,13 +109,15 @@ class OllamaEmbedder:
         self.timeout = timeout
         self.batch_size = max(1, batch_size)
 
-    def embed_query(self, text: str) -> List[float]:
+    def embed_query(self, text: str) -> list[float]:
         return self.embed_documents([text])[0]
 
-    def embed_documents(self, texts: Sequence[str]) -> List[List[float]]:
-        out: List[List[float]] = []
+    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        out: list[list[float]] = []
         for start in range(0, len(texts), self.batch_size):
-            batch = [t if t.strip() else " " for t in texts[start : start + self.batch_size]]
+            batch = [
+                t if t.strip() else " " for t in texts[start : start + self.batch_size]
+            ]
             try:
                 response = _post(
                     "/api/embed",
@@ -157,8 +158,8 @@ class OllamaChat:
         *,
         timeout: float = 300.0,
         temperature: float = 0.0,
-        system: Optional[str] = None,
-        options: Optional[Dict[str, Any]] = None,
+        system: str | None = None,
+        options: dict[str, Any] | None = None,
     ) -> None:
         self.model = model
         self.timeout = timeout
@@ -166,8 +167,8 @@ class OllamaChat:
         self.system = system
         self.options = dict(options or {})
 
-    def _payload(self, prompt: str, *, stream: bool) -> Dict[str, Any]:
-        messages: List[Dict[str, Any]] = []
+    def _payload(self, prompt: str, *, stream: bool) -> dict[str, Any]:
+        messages: list[dict[str, Any]] = []
         if self.system:
             messages.append({"role": "system", "content": self.system})
         messages.append({"role": "user", "content": prompt})
@@ -206,17 +207,13 @@ class OllamaChat:
         """Caption an image with a vision model such as ``llava`` or ``llama3.2-vision``."""
         payload = {
             "model": self.model,
-            "messages": [
-                {"role": "user", "content": prompt, "images": [image_base64]}
-            ],
+            "messages": [{"role": "user", "content": prompt, "images": [image_base64]}],
             "stream": False,
         }
         try:
             response = _post("/api/chat", payload, timeout=self.timeout)
         except Exception as exc:
-            raise ChatError(
-                f"Ollama vision failed: {_explain(exc, self.model)}"
-            ) from exc
+            raise ChatError(f"Ollama vision failed: {_explain(exc, self.model)}") from exc
         return str(response.get("message", {}).get("content", ""))
 
     def __repr__(self) -> str:  # pragma: no cover - cosmetic

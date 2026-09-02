@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-from typing import Any, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from ..errors import EmbeddingError, MissingDependencyError
 from ..types import Hit
 
 log = logging.getLogger("softrag.providers.local")
 
-__all__ = ["SentenceTransformerEmbedder", "CrossEncoderReranker", "is_available"]
+__all__ = ["CrossEncoderReranker", "SentenceTransformerEmbedder", "is_available"]
 
 DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
@@ -53,10 +54,10 @@ class SentenceTransformerEmbedder:
         self,
         model: str = DEFAULT_EMBED_MODEL,
         *,
-        device: Optional[str] = None,
+        device: str | None = None,
         batch_size: int = 32,
         normalize: bool = True,
-        prompt_name: Optional[str] = None,
+        prompt_name: str | None = None,
     ) -> None:
         try:
             from sentence_transformers import SentenceTransformer
@@ -77,18 +78,18 @@ class SentenceTransformerEmbedder:
         """Width of the vectors this model produces."""
         return int(self.model.get_sentence_embedding_dimension())
 
-    def embed_query(self, text: str) -> List[float]:
+    def embed_query(self, text: str) -> list[float]:
         kwargs: dict[str, Any] = {}
         if self.prompt_name:
             kwargs["prompt_name"] = self.prompt_name
         return self._encode([text], **kwargs)[0]
 
-    def embed_documents(self, texts: Sequence[str]) -> List[List[float]]:
+    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
         return self._encode(list(texts))
 
-    def _encode(self, texts: Sequence[str], **kwargs: Any) -> List[List[float]]:
+    def _encode(self, texts: Sequence[str], **kwargs: Any) -> list[list[float]]:
         try:
             vectors = self.model.encode(
                 list(texts),
@@ -130,7 +131,7 @@ class CrossEncoderReranker:
         self,
         model: str = DEFAULT_RERANK_MODEL,
         *,
-        device: Optional[str] = None,
+        device: str | None = None,
         batch_size: int = 32,
         max_length: int = 512,
     ) -> None:
@@ -146,7 +147,7 @@ class CrossEncoderReranker:
         log.debug("loading cross-encoder %s", model)
         self.model = CrossEncoder(model, max_length=max_length, device=device)
 
-    def rerank(self, query: str, hits: Sequence[Hit], *, top_k: int) -> List[Hit]:
+    def rerank(self, query: str, hits: Sequence[Hit], *, top_k: int) -> list[Hit]:
         """Score every hit against the query and return the best ``top_k``."""
         if not hits:
             return []
@@ -159,8 +160,10 @@ class CrossEncoderReranker:
             log.warning("reranking failed (%s); keeping the original order", exc)
             return list(hits[:top_k])
 
-        ranked = sorted(zip(hits, scores), key=lambda pair: float(pair[1]), reverse=True)
-        out: List[Hit] = []
+        ranked = sorted(
+            zip(hits, scores, strict=True), key=lambda pair: float(pair[1]), reverse=True
+        )
+        out: list[Hit] = []
         for hit, score in ranked[:top_k]:
             hit.score = float(score)
             out.append(hit)

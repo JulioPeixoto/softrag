@@ -8,33 +8,27 @@ the right shape can be plugged in.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import (
     Any,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
-    Mapping,
-    Optional,
     Protocol,
-    Sequence,
     runtime_checkable,
 )
 
 __all__ = [
-    "Chunk",
-    "Hit",
     "Answer",
-    "StreamingAnswer",
+    "ChatModel",
+    "Chunk",
+    "Embedder",
+    "Extractor",
+    "Hit",
     "IngestResult",
+    "Reranker",
     "SourceInfo",
     "Stats",
-    "Embedder",
-    "ChatModel",
+    "StreamingAnswer",
     "StreamingChatModel",
-    "Reranker",
-    "Extractor",
     "Where",
 ]
 
@@ -48,7 +42,7 @@ class Chunk:
     """A unit of indexable text plus the metadata travelling with it."""
 
     text: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     #: Position of this chunk inside its source document, starting at 0.
     index: int = 0
     #: Stable identifier of the document this chunk was cut from.
@@ -67,13 +61,13 @@ class Hit:
     score: float
     source: str = ""
     index: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     #: Cosine distance from the query vector, when vector search contributed.
-    vector_distance: Optional[float] = None
+    vector_distance: float | None = None
     #: Raw BM25 score, when keyword search contributed. Lower is a better match.
-    bm25: Optional[float] = None
+    bm25: float | None = None
     #: 1-based rank in each contributing list, keyed by "vector" / "keyword".
-    ranks: Dict[str, int] = field(default_factory=dict)
+    ranks: dict[str, int] = field(default_factory=dict)
 
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         preview = self.text[:60].replace("\n", " ")
@@ -97,9 +91,9 @@ class Answer(str):
             print(hit.source, hit.score)
     """
 
-    __slots__ = ("hits", "question", "prompt")
+    __slots__ = ("hits", "prompt", "question")
 
-    hits: List[Hit]
+    hits: list[Hit]
     question: str
     prompt: str
 
@@ -110,7 +104,7 @@ class Answer(str):
         hits: Sequence[Hit] = (),
         question: str = "",
         prompt: str = "",
-    ) -> "Answer":
+    ) -> Answer:
         self = super().__new__(cls, text)
         self.hits = list(hits)
         self.question = question
@@ -118,9 +112,9 @@ class Answer(str):
         return self
 
     @property
-    def sources(self) -> List[str]:
+    def sources(self) -> list[str]:
         """Unique source identifiers behind this answer, best-scoring first."""
-        seen: Dict[str, None] = {}
+        seen: dict[str, None] = {}
         for hit in self.hits:
             if hit.source:
                 seen.setdefault(hit.source, None)
@@ -140,7 +134,7 @@ class StreamingAnswer:
     whatever has been produced so far.
     """
 
-    __slots__ = ("_stream", "hits", "question", "prompt", "_parts", "_done")
+    __slots__ = ("_done", "_parts", "_stream", "hits", "prompt", "question")
 
     def __init__(
         self,
@@ -151,10 +145,10 @@ class StreamingAnswer:
         prompt: str = "",
     ) -> None:
         self._stream = stream
-        self.hits: List[Hit] = list(hits)
+        self.hits: list[Hit] = list(hits)
         self.question = question
         self.prompt = prompt
-        self._parts: List[str] = []
+        self._parts: list[str] = []
         self._done = False
 
     def __iter__(self) -> Iterator[str]:
@@ -172,8 +166,8 @@ class StreamingAnswer:
         return "".join(self._parts)
 
     @property
-    def sources(self) -> List[str]:
-        seen: Dict[str, None] = {}
+    def sources(self) -> list[str]:
+        seen: dict[str, None] = {}
         for hit in self.hits:
             if hit.source:
                 seen.setdefault(hit.source, None)
@@ -197,7 +191,7 @@ class IngestResult:
     chunks_skipped: int = 0
     chunks_deleted: int = 0
     characters: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -223,7 +217,7 @@ class SourceInfo:
     chunks: int
     characters: int
     added_at: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -233,7 +227,7 @@ class Stats:
     path: str
     documents: int
     sources: int
-    dimensions: Optional[int]
+    dimensions: int | None
     size_bytes: int
     schema_version: int
 
@@ -286,13 +280,11 @@ class StreamingChatModel(ChatModel, Protocol):
 class Reranker(Protocol):
     """Reorders candidate hits against the query, most relevant first."""
 
-    def rerank(self, query: str, hits: Sequence[Hit], *, top_k: int) -> List[Hit]:
-        ...
+    def rerank(self, query: str, hits: Sequence[Hit], *, top_k: int) -> list[Hit]: ...
 
 
 @runtime_checkable
 class Extractor(Protocol):
     """Turns bytes of some format into plain text."""
 
-    def extract(self, data: bytes, *, filename: str = "") -> str:
-        ...
+    def extract(self, data: bytes, *, filename: str = "") -> str: ...
