@@ -75,6 +75,60 @@ by only one retriever, trails both.
 The weights come from `vector_weight` and `keyword_weight`. A weight of `0`
 excludes that list entirely, which is a softer way to spell `mode="vector"`.
 
+## How the keyword query is built
+
+This is where most of the quality in hybrid search actually lives, and it is
+the part naive implementations get wrong.
+
+Your question is not passed to FTS5 as written. Two things happen first.
+
+**Every term is quoted as a phrase.** FTS5 has a query language in which `AND`,
+`OR`, `NOT`, `NEAR`, `*`, `:`, `^`, `(` and `"` are syntax. Passing raw text
+through means an ordinary question like *"the NOT thing"* raises
+`fts5: syntax error near "NOT"`. Quoting neutralises all of it.
+
+**Terms that cannot discriminate are dropped.** Consider *"when can we ship
+code to customers"*. OR-ing every token asks FTS5 for anything containing *can*,
+*we* or *to* — which is most of the corpus — and rank fusion then promotes that
+noise above correct dense hits. On a labelled set this made hybrid search
+measurably **worse** than vector search alone: the right answer was pushed out
+of the top three entirely.
+
+BM25 cannot rescue it. BM25 reweights documents that already matched; it never
+gets to reject a candidate set assembled from stopwords.
+
+So two filters run before the MATCH is built:
+
+- a **stopword list** (English and Portuguese), which is what works on a small
+  corpus, where every term looks rare and frequencies say nothing;
+- a **document-frequency cutoff**, dropping terms present in more than 35% of
+  chunks, which is what works on a large one. Frequencies are memoised per
+  corpus size.
+
+If the frequency cutoff would remove *every* term, the terms are kept. A query
+whose words are merely too common is still a real query — unlike one made
+entirely of stopwords, where the honest answer is that keyword search has
+nothing to contribute and dense retrieval should answer alone.
+
+You can inspect exactly what will be searched:
+
+```python
+rag.store.build_match("when can we ship code to customers")
+# '"ship" OR "code" OR "customers"'
+
+rag.store.build_match("what is it")
+# ''   -- no keyword signal; hybrid search becomes vector-only for this query
+```
+
+To change the stopword list, for another language or a domain where a common
+word matters:
+
+```python
+from softrag import stopwords
+
+stopwords.STOPWORDS = stopwords.ENGLISH | {"ainda", "porém"}
+```
+
 ## Reading the scores
 
 `hit.score` means something different per mode. This trips people up:
@@ -243,7 +297,7 @@ and discarding the ones that do not match, which silently returns fewer (or no)
 results when the filter is selective. softrag resolves the filter *first*
 against the indexed `documents` table and scores only the surviving rows
 exactly. A filter matching 40 chunks out of a million returns the best of those
-40, every time. Above ~20,000 matching rows exact rescoring stops paying for
+40, every time. Above ~1,000 matching rows exact rescoring stops paying for
 itself and softrag falls back to over-fetched KNN plus filtering — by which
 point the filter is not selective enough for the difference to matter.
 

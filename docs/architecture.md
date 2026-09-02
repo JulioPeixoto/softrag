@@ -182,19 +182,36 @@ softrag inverts the order when it can:
                  │          │
                  └──────────┴─► resolve the filter on documents (indexed, cheap)
                                         │
-                              matching rows ≤ 20,000 ?
-                                 ┌─── yes ───► vec_distance_cosine over exactly
-                                 │             those rows, sort, take k  (exact)
+                              matching rows ≤ 1,000 ?
+                                 ┌─── yes ───► vec_distance_cosine per row,
+                                 │             sort, take k            (exact)
                                  └─── no  ───► KNN over-fetch k*8, then filter
                                                                   (approximate)
 ```
 
 The filter resolves against `documents`, which is a normal indexed B-tree, so
-finding the matching ids is cheap. Scoring a few thousand vectors exactly is
-also cheap. Below the 20,000-row threshold you therefore get the true best `k`
-among the matching rows — a selective filter costs no recall at all. Above it,
-the filter is not selective enough for over-fetching to miss much, and exact
-rescoring would cost more than it is worth.
+finding the matching ids is cheap. Below the 1,000-row threshold you get the
+true best `k` among the matching rows — a selective filter costs no recall at
+all. Above it, the filter is not selective enough for over-fetching to miss
+much, and exact rescoring would cost more than it is worth.
+
+The threshold is measured, not guessed, and the shape of the measurement is
+worth knowing because it is counter-intuitive. Exact rescoring uses **one point
+lookup per row**, which looks wasteful next to collecting the ids and asking for
+`doc_id IN (...)`. But `vec0` answers an `IN` with a full table scan
+(`EXPLAIN QUERY PLAN` says `SCAN vectors VIRTUAL TABLE INDEX 0:1`), while an
+equality on the primary key is a real lookup. On 20k 384-dimension vectors:
+
+| strategy | 2,000 rows |
+| --- | ---: |
+| native KNN, k=20 (whole corpus) | 7.4 ms |
+| `IN` batches of 500 | 29.7 ms |
+| a single `IN` of 2,000 ids | 17.6 ms |
+| 2,000 point lookups | 16.5 ms |
+| 100 point lookups | 0.8 ms |
+
+Point lookups win decisively while the filter is selective and lose to native
+KNN somewhere around a thousand rows, which is where the threshold sits.
 
 `source="handbook.pdf"` is a cheaper special case: `source` is a real column on
 `vectors`, so it is pushed into the KNN query directly with no JSON extraction.
