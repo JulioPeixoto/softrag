@@ -16,6 +16,7 @@ from ..errors import ChatError, ConfigurationError, EmbeddingError, MissingDepen
 
 __all__ = ["OpenAIChat", "OpenAIEmbedder"]
 
+
 def is_available() -> bool:
     """Whether the ``openai`` SDK is importable.
 

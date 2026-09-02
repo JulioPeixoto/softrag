@@ -15,6 +15,7 @@ from ..errors import ChatError, ConfigurationError, MissingDependencyError
 
 __all__ = ["AnthropicChat", "is_available"]
 
+
 def is_available() -> bool:
     """Whether the ``anthropic`` SDK is importable."""
     return importlib.util.find_spec("anthropic") is not None

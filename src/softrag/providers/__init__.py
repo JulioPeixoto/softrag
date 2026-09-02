@@ -160,17 +160,21 @@ def adapt_embedder(embedder: Any) -> Embedder:
 class _ChatAdapter:
     """Wraps a foreign chat object in the :class:`ChatModel` protocol."""
 
-    __slots__ = ("_complete", "_name", "_stream")
+    __slots__ = ("_complete", "_name", "_stream", "target")
 
     def __init__(
         self,
         complete: Callable[[str], str],
         stream: Callable[[str], Iterator[str]] | None,
         name: str,
+        target: Any = None,
     ) -> None:
         self._complete = complete
         self._stream = stream
         self._name = name
+        #: The object being adapted. AsyncRag reads native ``acomplete`` and
+        #: ``astream`` off it, since they are invisible through the adapter.
+        self.target = target
 
     def complete(self, prompt: str) -> str:
         try:
@@ -220,14 +224,14 @@ def adapt_chat_model(model: Any) -> ChatModel:
 
     complete = getattr(model, "complete", None)
     if callable(complete):
-        return _ChatAdapter(complete, stream, name)
+        return _ChatAdapter(complete, stream, name, model)
 
     invoke = getattr(model, "invoke", None)
     if callable(invoke):
-        return _ChatAdapter(invoke, stream, name)
+        return _ChatAdapter(invoke, stream, name, model)
 
     if callable(model):
-        return _ChatAdapter(model, stream, name)
+        return _ChatAdapter(model, stream, name, model)
 
     raise ConfigurationError(
         f"Cannot use {name} as a chat model. Provide an object with complete() "
@@ -339,9 +343,7 @@ def auto_embedder(*, model: str | None = None) -> Embedder:
     if os.getenv("OPENAI_API_KEY"):
         if openai_provider.is_available():
             log.debug("auto-detected OpenAI embeddings")
-            return openai_provider.OpenAIEmbedder(
-                model=model or "text-embedding-3-small"
-            )
+            return openai_provider.OpenAIEmbedder(model=model or "text-embedding-3-small")
         # A key in the environment without the SDK installed is a common
         # combination -- the key lives in a shell profile, and `pip install
         # softrag` pulls no vendor SDKs. Falling through beats failing, so
@@ -541,23 +543,36 @@ def _as_text(value: Any) -> str:
     """Pull plain text out of whatever a chat backend returned."""
     if isinstance(value, str):
         return value
+    if value is None:
+        return ""
+
     content = getattr(value, "content", None)
-    if content is not None:
-        if isinstance(content, str):
-            return content
-        # Anthropic-style content blocks.
-        if isinstance(content, (list, tuple)):
-            parts = []
-            for block in content:
-                text = getattr(block, "text", None)
-                if text is None and isinstance(block, dict):
-                    text = block.get("text")
-                if text:
-                    parts.append(str(text))
-            return "".join(parts)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, (list, tuple)):
+        return _join_blocks(content)
+
+    # Some backends return the block list itself rather than an object wrapping
+    # it. Without this the answer would come back as a Python repr.
+    if isinstance(value, (list, tuple)):
+        return _join_blocks(value)
+
     text = getattr(value, "text", None)
     if isinstance(text, str):
         return text
-    if value is None:
-        return ""
     return str(value)
+
+
+def _join_blocks(blocks: Any) -> str:
+    """Concatenate the text of Anthropic-style content blocks."""
+    parts: list[str] = []
+    for block in blocks:
+        if isinstance(block, str):
+            parts.append(block)
+            continue
+        text = getattr(block, "text", None)
+        if text is None and isinstance(block, dict):
+            text = block.get("text")
+        if text:
+            parts.append(str(text))
+    return "".join(parts)

@@ -123,10 +123,14 @@ class _HTMLTextExtractor(HTMLParser):
             self.parts.append("\n")
 
     def handle_data(self, data: str) -> None:
-        if self._skip_depth:
-            return
+        # The title check has to come first. <title> lives inside <head>, and
+        # <head> is skipped, so testing _skip_depth first means the title of
+        # every real document is discarded -- while a stray <title> outside
+        # <head> still works, which is what hides the bug.
         if self._in_title:
             self.title += data.strip()
+            return
+        if self._skip_depth:
             return
         if data.strip():
             self.parts.append(data)

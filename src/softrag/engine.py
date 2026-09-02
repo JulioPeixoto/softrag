@@ -565,7 +565,7 @@ class Rag:
             metadata=metadata or {},
         )
 
-        start = 0 if on_change != "append" else _next_index(self.store, source)
+        start = 0 if on_change != "append" else self.store.next_chunk_index(source)
         added = skipped = 0
         for batch in _batches(chunks, self.config.embed_batch_size):
             vectors = self.embedder.embed_documents(batch)
@@ -820,11 +820,3 @@ def _batches(items: Sequence[str], size: int) -> Iterator[list[str]]:
     size = max(1, size)
     for start in range(0, len(items), size):
         yield list(items[start : start + size])
-
-
-def _next_index(store: Store, source: str) -> int:
-    row = store.db.execute(
-        "SELECT COALESCE(MAX(chunk_index), -1) + 1 FROM documents WHERE source = ?",
-        (source,),
-    ).fetchone()
-    return int(row[0]) if row else 0

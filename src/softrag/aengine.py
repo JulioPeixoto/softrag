@@ -8,8 +8,10 @@ do most embedding SDKs, so the blocking work runs in a worker thread via
 :func:`asyncio.to_thread`. That is not a marketing "async" -- it is the thing
 that matters in an async application, because the event loop stays free to
 serve other requests while an embedding call or a disk read is in flight.
-Where a backend *does* offer native coroutines (``aembed_documents``,
-``acomplete``, ``astream``), they are used directly instead.
+Where a chat backend offers native coroutines (``acomplete``, ``astream``),
+they are used directly instead. Embedding always goes through the worker
+thread: ingestion is shared with the synchronous engine, and duplicating that
+whole path to save one hop would mean maintaining two of it.
 """
 
 from __future__ import annotations
@@ -105,8 +107,8 @@ class AsyncRag:
     """The async twin of :class:`~softrag.engine.Rag`.
 
     Args:
-        embed_model: Any embedder. Native ``aembed_documents`` is used when the
-            object offers it.
+        embed_model: Any embedder. It is called in a worker thread, so a
+            synchronous one does not block the event loop.
         chat_model: Any chat backend, or ``None`` for retrieval only.
         db_path: Where the index lives.
         chunker: Chunking strategy.
@@ -322,14 +324,16 @@ class AsyncRag:
         )
 
     async def _complete(self, model: Any, prompt: str) -> str:
-        native = getattr(model, "acomplete", None)
+        # The adapter does not forward the backend's own coroutines, so the
+        # native fast path has to be looked for on the object it wrapped.
+        native = getattr(getattr(model, "target", model), "acomplete", None)
         if callable(native):
             return str(await native(prompt))
         return str(await asyncio.to_thread(model.complete, prompt))
 
     async def _stream(self, model: Any, prompt: str) -> AsyncIterator[str]:
         """Yield deltas, preferring a native async stream when one exists."""
-        native = getattr(model, "astream", None)
+        native = getattr(getattr(model, "target", model), "astream", None)
         if callable(native):
             async for delta in native(prompt):
                 yield delta

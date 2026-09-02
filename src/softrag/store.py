@@ -845,6 +845,14 @@ class Store:
         if not tokens:
             return ""
 
+        # Everything below touches the shared connection, so it runs under the
+        # same lock as any other read. sqlite3 will happily interleave two
+        # threads' statements on one connection and hand back another query's
+        # rows; the symptom is a value of the wrong type appearing from nowhere.
+        with self._lock:
+            return self._build_match(tokens)
+
+    def _build_match(self, tokens: Sequence[str]) -> str:
         # A fixed stopword list and a document-frequency cutoff catch the same
         # problem at different scales. Frequencies are decisive on a large
         # corpus but meaningless on a small one, where every term looks rare --
@@ -1051,6 +1059,16 @@ class Store:
         if row is None:
             return False
         return content_hash is None or row[0] == content_hash
+
+    def next_chunk_index(self, source: str) -> int:
+        """The chunk index an appended chunk should take for ``source``."""
+        with self._lock:
+            row = self.db.execute(
+                "SELECT COALESCE(MAX(chunk_index), -1) + 1 FROM documents "
+                "WHERE source = ?",
+                (source,),
+            ).fetchone()
+        return int(row[0]) if row else 0
 
     def count(self) -> int:
         """Number of indexed chunks."""
