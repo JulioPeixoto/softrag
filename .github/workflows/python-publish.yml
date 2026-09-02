@@ -28,8 +28,8 @@ jobs:
         # Publishing a wheel that cannot be imported is the one failure worth
         # spending a job on, and it is invisible to a source-tree test run.
         run: |
-          python -m venv /tmp/verify
-          /tmp/verify/bin/pip install --quiet dist/*.whl
+          uv venv /tmp/verify
+          uv pip install --python /tmp/verify/bin/python dist/*.whl
           /tmp/verify/bin/python -c "
           import softrag, importlib.resources as r
           print('version', softrag.__version__)
@@ -40,9 +40,9 @@ jobs:
           "
 
       - name: Check package metadata
-        run: |
-          python -m pip install --quiet twine
-          twine check dist/*
+        # uvx, not `python -m pip`: the runner's system Python is externally
+        # managed (PEP 668) and refuses a direct install.
+        run: uvx twine check dist/*
 
       - uses: actions/upload-artifact@v4
         with:
