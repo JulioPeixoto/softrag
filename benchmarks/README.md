@@ -21,13 +21,17 @@ per configuration, `top_k=5`. Latency is the median (p50) in milliseconds.
 
 | chunks | ingest | chunks/s | db size | bytes/chunk |
 | -----: | -----: | -------: | ------: | ----------: |
-|  2,002 |  0.83s |    2,419 |    5.3M |       2,627 |
-| 19,941 |  8.80s |    2,266 |   50.8M |       2,545 |
+|  1,842 |  0.77s |    2,392 |    5.1M |       2,753 |
+| 18,307 |  6.91s |    2,651 |   45.6M |       2,492 |
 
 | chunks | hybrid | vector | keyword | + filter | + MMR |
-| -----: | -----: | -----: | ------: | -------: | ----: |
-|  2,002 |   2.7ms |  1.7ms |   1.0ms |    3.1ms | 10.0ms |
-| 19,941 |  26.3ms | 15.8ms |   7.8ms |   28.8ms | 36.8ms |
+| -----: | -----: | -----: | ------: | -------: | -----: |
+|  1,842 |  2.3ms |  1.6ms |   0.4ms |    2.5ms |  6.3ms |
+| 18,307 | 17.1ms | 13.4ms |   3.1ms |   21.0ms | 24.7ms |
+
+Those are after the fixes below. For scale, the same benchmark against the
+first working version of this rewrite reported 26.7 ms hybrid, 9.6 ms keyword,
+75.6 ms filtered and 48.5 ms with MMR at a comparable corpus size.
 
 Disk cost is dominated by the vectors: 384 float32 values is 1,536 bytes, so
 ~2.5 KB per chunk means the text, metadata and both indexes together add roughly
@@ -54,9 +58,15 @@ a time. The obvious implementation — collecting the ids and asking for
 `doc_id IN (...)` — is a trap: `vec0` answers an `IN` with a full table scan, so
 batching ids that way was measured at 75ms where the current code takes 28ms.
 
-**MMR is opt-in for a reason.** `diversity>0` adds roughly 10ms, because it
-loads the candidate vectors back and does the greedy selection in pure Python.
+**MMR is opt-in for a reason.** `diversity>0` adds several milliseconds: it
+loads the candidate vectors back and runs the greedy selection in pure Python.
 Worth it when your corpus contains near-duplicate passages; wasted otherwise.
+
+**Keyword search got faster by doing less.** Dropping stopwords and
+high-document-frequency terms before building the FTS5 query cut keyword
+latency from 9.6 ms to 3.1 ms, because far fewer documents match in the first
+place. That the same change also improved retrieval quality is not a
+coincidence: the candidates it stopped fetching were the noisy ones.
 
 **Ingestion throughput here is not yours.** ~2,300 chunks/second is the storage
 layer alone. With a real embedding model, ingestion is bounded almost entirely by
