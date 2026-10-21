@@ -197,3 +197,5 @@ src/softrag/_version.py
 *.db-shm
 
 .claude/worktrees/
+
+paper
